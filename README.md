@@ -88,6 +88,25 @@ Copy `skill/incident-check` into `~/.claude/skills/`, then:
 Claude Code reads the article, runs `blastcheck` with your `gh` login and reports the result.
 No API key is needed for this route.
 
+## Automatic mode
+
+`blastcheck watch --org <org>` needs no incident. It asks the public malware database (OSV)
+about every package your repos use and runs the same check for each malware advisory it finds.
+
+- A pinned bad version is always reported.
+- A loose range that could resolve to a bad version is reported only while the advisory is
+  recent (7 days by default, `--recent-days`). Malicious releases are removed from the registry
+  quickly, after which a loose range can no longer pull them.
+- Nothing matching means no issue, no notice and a green run.
+- An issue someone has closed is left closed.
+- If OSV cannot be reached the run fails; it never reports a quiet day it did not check.
+
+The **Daily watch** workflow runs this every day at 02:30 UTC with the same secret as the
+incident check. It covers malicious releases only; ordinary vulnerabilities are out of scope.
+
+A Conda package that shares its name and version with a bad PyPI release is reported as a name
+collision to verify, not as affected: Conda does not install from PyPI.
+
 ## Which branches are read
 
 Each repo's default branch, plus branches whose code is likely being installed now:

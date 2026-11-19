@@ -1,0 +1,98 @@
+name: Daily watch
+
+# Every day, asks the public malware database (OSV) about each package your repos use.
+# Opens an issue only when a known-malicious release matches something in the org;
+# otherwise it stays silent. Runs entirely on your own runner with your own secrets.
+
+on:
+  schedule:
+    - cron: "30 2 * * *"   # 02:30 UTC daily; change to suit your timezone
+  workflow_dispatch:
+    inputs:
+      recent_days:
+        description: "Report loose version ranges only for advisories this many days old or newer"
+        required: false
+        default: "7"
+      allow_public:
+        description: "Run even though this repo is public (logs, artifacts and issues will expose private repo names)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: blastcheck
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Refuse to run in a public repo
+        # Logs, the cache, the artifact and the issues are as visible as this repo.
+        if: ${{ github.event.repository.private != true && inputs.allow_public != true }}
+        run: |
+          echo "::error::This repo is public (or its visibility is unknown). The report names private repos and files, so the watch will not run here. Make the repo private, or run it manually with allow_public ticked."
+          exit 3
+
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore the inventory from the last run
+        uses: actions/cache/restore@v4
+        with:
+          path: .blastcheck/inventory.json
+          key: blastcheck-inventory-${{ github.repository_owner }}-${{ github.run_id }}
+          restore-keys: blastcheck-inventory-${{ github.repository_owner }}-
+
+      - name: Install
+        run: pip install --quiet .
+
+      - name: Sweep the org's packages
+        # Secrets are given to this step only. Inputs go through the environment, never the command text.
+        env:
+          IN_ORG: ${{ github.repository_owner }}
+          IN_RECENT_DAYS: ${{ inputs.recent_days || '7' }}
+          IN_ALLOW_PUBLIC: ${{ inputs.allow_public }}
+          BLASTCHECK_ORG_TOKEN: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
+          BLASTCHECK_ISSUE_TOKEN: ${{ github.token }}
+          BLASTCHECK_SLACK_WEBHOOK: ${{ secrets.BLASTCHECK_SLACK_WEBHOOK }}
+          BLASTCHECK_SMTP_HOST: ${{ secrets.BLASTCHECK_SMTP_HOST }}
+          BLASTCHECK_SMTP_PORT: ${{ secrets.BLASTCHECK_SMTP_PORT }}
+          BLASTCHECK_SMTP_USER: ${{ secrets.BLASTCHECK_SMTP_USER }}
+          BLASTCHECK_SMTP_PASSWORD: ${{ secrets.BLASTCHECK_SMTP_PASSWORD }}
+          BLASTCHECK_MAIL_FROM: ${{ secrets.BLASTCHECK_MAIL_FROM }}
+          BLASTCHECK_MAIL_TO: ${{ secrets.BLASTCHECK_MAIL_TO }}
+        run: |
+          if [ -z "$BLASTCHECK_ORG_TOKEN" ]; then
+            echo "::error::Add the BLASTCHECK_ORG_TOKEN secret: a token with read access to the org's repos."
+            exit 3
+          fi
+          case "$IN_RECENT_DAYS" in ''|*[!0-9]*) IN_RECENT_DAYS=7 ;; esac
+          args=(watch --org "$IN_ORG" --issue-repo "$GITHUB_REPOSITORY" --notify --quiet --recent-days "$IN_RECENT_DAYS")
+          if [ "$IN_ALLOW_PUBLIC" = "true" ]; then args+=(--allow-public-issue-repo); fi
+          blastcheck "${args[@]}"
+
+      - name: Save the inventory for the next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .blastcheck/inventory.json
+          key: blastcheck-inventory-${{ github.repository_owner }}-${{ github.run_id }}
+
+      - name: Keep the report files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blastcheck-watch
+          path: .blastcheck/reports/
+          if-no-files-found: ignore
+          retention-days: 30

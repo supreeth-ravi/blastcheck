@@ -46,7 +46,7 @@ def marker(incident: Incident) -> str:
 
 def title(incident: Incident, results: Iterable[RepoResult]) -> str:
     label = HEADLINES[headline(results)].split(" — ")[0]
-    return f"[blastcheck] {incident.package} {', '.join(incident.bad_versions)}: {label}"[:250]
+    return f"[blastcheck] {incident.package} {incident.versions_text}: {label}"[:250]
 
 
 def _by_verdict(results: Iterable[RepoResult], verdict: str) -> list[RepoResult]:
@@ -64,6 +64,8 @@ def _evidence_rows(results: list[RepoResult]) -> list[str]:
                 return rows
             joiner = "@" if dep.ecosystem == "npm" else (" " if dep.ecosystem in ("Go", "crates.io", "Maven") else "")
             declared = f"{dep.name}{joiner}{dep.spec}" if dep.spec else f"{dep.name} (no version)"
+            if dep.via == "conda":
+                declared += " (Conda package)"
             branch = code(dep.ref, table=True) if dep.ref else "default"
             rows.append(f"| {code(result.repo, table=True)} | {branch} | {code(dep.file, table=True)} "
                         f"| {code(declared, table=True)} |")
@@ -76,7 +78,8 @@ def _confirmation_line(incident: Incident) -> str:
     evidence = "; ".join(plain(item) for item in conf.evidence)
     if conf.status == "confirmed":
         return "**Confirmed** by an outside source: " + evidence
-    origin = {"article": "an article", "manual": "manual entry", "file": "an incident file"}.get(incident.origin, "manual entry")
+    origin = {"article": "an article", "manual": "manual entry", "file": "an incident file",
+              "advisory": "a published advisory"}.get(incident.origin, "manual entry")
     return (f"**Unconfirmed.** This incident comes from {origin} and no outside source has confirmed it yet. "
             + evidence)
 
@@ -84,7 +87,7 @@ def _confirmation_line(incident: Incident) -> str:
 def _checklist(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[str, ...]) -> list[str]:
     worst = headline(results)
     package = code(incident.package)
-    bad = ", ".join(incident.bad_versions)
+    bad = incident.versions_text
     steps: list[str] = []
     if _by_verdict(results, INCOMPLETE):
         steps.append("- [ ] Check the repos listed under \"Could not fully check\" by hand, or fix access and re-run")
@@ -145,7 +148,7 @@ def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[st
     opening, caveat = _coverage(results, skipped)
     affected = [r.repo for r in _by_verdict(results, AFFECTED)]
     at_risk = [r.repo for r in _by_verdict(results, AT_RISK)]
-    bad = " and ".join(incident.bad_versions)
+    bad = incident.versions_text
     name = incident.package
     if worst == AFFECTED:
         body = (f"{opening}. {len(affected)} pin an affected version of {name} ({bad}): {', '.join(affected)}. "
@@ -180,7 +183,8 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
         "",
         f"**Incident:** {plain(incident.display_title)}",
         f"**Package:** {code(incident.package)} ({incident.ecosystem}) — bad versions: "
-        + ", ".join(code(v) for v in incident.bad_versions)
+        + ("all versions" if incident.all_versions else ", ".join(code(v) for v in incident.bad_versions[:40]))
+        + (f" and {len(incident.bad_versions) - 40} more" if len(incident.bad_versions) > 40 else "")
         + (f" — last clean: {code(incident.last_clean)}" if incident.last_clean else ""),
     ]
     if incident.window:
@@ -207,6 +211,9 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
         group = _by_verdict(results, verdict)
         if group:
             lines += [f"### {heading}", "", *_evidence_rows(group), ""]
+            if verdict == AT_RISK and any(dep.via == "conda" for r in group for dep in r.evidence):
+                lines += ["Rows marked \"Conda package\" share a name and version with the bad release. Conda does not "
+                          "install from this registry, so check that it is only a name collision.", ""]
     unread = _by_verdict(results, INCOMPLETE)
     if unread:
         lines += ["### Could not fully check", ""]

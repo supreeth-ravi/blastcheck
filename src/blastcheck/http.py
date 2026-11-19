@@ -5,6 +5,7 @@ Authorization header is never forwarded elsewhere), and responses are size-cappe
 """
 from __future__ import annotations
 
+import http.client
 import json
 import time
 import urllib.error
@@ -70,15 +71,19 @@ def request(method: str, url: str, headers: dict[str, str] | None = None, payloa
                 body = raw.read(max_bytes + 1)
                 if len(body) > max_bytes:
                     raise HttpError(0, url, f"response larger than {max_bytes} bytes")
-                return Response(raw.status, {k.lower(): v for k, v in raw.headers.items()}, body)
+                response_headers = {k.lower(): v for k, v in raw.headers.items()}
+                expected = response_headers.get("content-length", "")
+                if expected.isdigit() and len(body) < int(expected):
+                    raise http.client.IncompleteRead(body)  # connection dropped mid-response: retry
+                return Response(raw.status, response_headers, body)
         except urllib.error.HTTPError as exc:
             headers_lower = {k.lower(): v for k, v in (exc.headers or {}).items()}
             detail = exc.read().decode(errors="replace")[:300] if exc.fp else str(exc.reason)
             last = HttpError(exc.code, url, detail, headers_lower)
             if exc.code not in RETRY_STATUSES:
                 raise last from exc
-        except (urllib.error.URLError, TimeoutError, OSError) as exc:
-            last = HttpError(0, url, str(exc))
+        except (urllib.error.URLError, TimeoutError, OSError, http.client.HTTPException) as exc:
+            last = HttpError(0, url, f"{type(exc).__name__}: {str(exc)[:120]}")
         time.sleep(1.5 * (attempt + 1))
     assert last is not None
     raise last

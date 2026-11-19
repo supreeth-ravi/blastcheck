@@ -173,6 +173,18 @@ def _npm_accepts(spec: str, version: str) -> bool:
     return False
 
 
+def in_range(version: str, introduced: str, upper: str, upper_inclusive: bool) -> bool:
+    """True when `version` lies in [introduced, upper). Unusual versions fail open (True)."""
+    if not is_plain(version) or not is_plain(introduced) or (upper and not is_plain(upper)):
+        return True
+    numbers = release(version)
+    if _lt(numbers, release(introduced)):
+        return False
+    if not upper:
+        return True
+    return not _lt(release(upper), numbers) if upper_inclusive else _lt(numbers, release(upper))
+
+
 def accepts(ecosystem: str, spec: str, version: str) -> bool:
     """True when installing with `spec` could resolve to `version`."""
     spec = (spec or "").strip()

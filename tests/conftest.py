@@ -9,6 +9,16 @@ from blastcheck.github import GitHubError
 from blastcheck.models import Incident, RepoInventory
 
 
+@pytest.fixture(autouse=True)
+def no_real_network(monkeypatch):
+    """Any test that reaches the real network fails instead of silently depending on it."""
+    from blastcheck import http
+
+    def refuse(req, timeout):
+        raise AssertionError(f"test tried to reach the network: {req.full_url}")
+    monkeypatch.setattr(http, "_open", refuse)
+
+
 def repo(name, files, errors=(), pushed_at="2026-11-01T00:00:00Z"):
     """Build a RepoInventory from {path: file text}."""
     deps = []
@@ -131,6 +141,8 @@ class FakeGitHub:
     def is_private(self, repo):
         return not repo.endswith("-public")
 
-    def upsert_issue(self, repo, marker, title, body):
+    def upsert_issue(self, repo, marker, title, body, reopen=True):
+        if marker in getattr(self, "closed_markers", ()) and not reopen:
+            return "https://example.test/issues/closed"
         self.issues.append((repo, title, body))
         return "https://example.test/issues/1"

@@ -192,3 +192,32 @@ def test_extract_refuses_to_guess(payload, stop):
     client, _ = client_returning(payload, stop)
     with pytest.raises(extract.ExtractError):
         extract.extract("article body", "https://example.test/post", client)
+
+
+def test_truncated_responses_are_retried_then_reported_not_crashed_on(monkeypatch):
+    monkeypatch.setattr(http.time, "sleep", lambda _: None)
+    calls = []
+
+    class Short(FakeRaw):
+        def __init__(self, body, declared):
+            super().__init__(body)
+            self.headers = {"Content-Length": str(declared)}
+
+    def flaky(req, timeout):
+        calls.append(1)
+        return Short(b'{"ok": tr', 12) if len(calls) < 3 else Short(b'{"ok": true}', 12)
+    monkeypatch.setattr(http, "_open", flaky)
+    assert http.request("GET", "https://example.test/x").json() == {"ok": True} and len(calls) == 3
+
+    monkeypatch.setattr(http, "_open", lambda req, timeout: Short(b'{"ok": tr', 12))
+    with pytest.raises(http.HttpError) as info:
+        http.request("GET", "https://example.test/x")
+    assert info.value.status == 0 and "IncompleteRead" in info.value.message
+
+
+def test_github_turns_an_unreadable_body_into_a_read_failure(monkeypatch):
+    monkeypatch.setattr(http, "request", lambda *a, **k: http.Response(200, {}, b'{"tree": [{"path": "a'))
+    with pytest.raises(github.GitHubError):
+        github.GitHub("t").tree("acme-labs/r", "main")
+    with pytest.raises(github.GitHubError):
+        github.GitHub("t").graphql("query {}")

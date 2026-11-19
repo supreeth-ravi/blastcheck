@@ -24,11 +24,12 @@ class Dep:
     version: str | None  # exact version when known, else None
     spec: str  # the raw specifier as written
     exact: bool  # True when `version` is what will be installed
+    via: str = ""  # "conda" when the line names a Conda package rather than one from this ecosystem's registry
     ref: str = ""  # branch the line was found on; empty means the default branch
 
 
 def _deps_to_json(deps: tuple[Dep, ...]) -> list[list]:
-    return [[d.file, d.ecosystem, d.name, d.version, d.spec, d.exact] for d in deps]
+    return [[d.file, d.ecosystem, d.name, d.version, d.spec, d.exact, d.via] for d in deps]
 
 
 def _deps_from_json(rows: object) -> tuple[Dep, ...]:
@@ -124,18 +125,36 @@ class Incident:
     indicators: tuple[str, ...] = ()
     credentials_at_risk: tuple[str, ...] = ()
     sources: tuple[str, ...] = ()
-    origin: str = "manual"  # "manual" | "article" | "file"
+    origin: str = "manual"  # "manual" | "article" | "file" | "advisory"
+    all_versions: bool = False  # the whole package is bad (for example a typosquat)
+    # Bad version ranges as (introduced, upper bound or "", upper bound is inclusive)
+    bad_ranges: tuple[tuple[str, str, bool], ...] = ()
+    advisory_id: str = ""  # set when the incident comes from a published advisory
     confirmation: Confirmation = field(default_factory=lambda: Confirmation("unconfirmed"))
 
     @property
     def slug(self) -> str:
-        versions = "-".join(self.bad_versions[:3])
+        if self.advisory_id:
+            return "".join(ch if ch.isalnum() or ch in "-." else "-" for ch in self.advisory_id.lower())
+        versions = "-".join(self.bad_versions[:3]) or "all"
         raw = f"{self.ecosystem}-{self.package}-{versions}".lower()
         return "".join(ch if ch.isalnum() or ch in "-." else "-" for ch in raw)
 
     @property
+    def versions_text(self) -> str:
+        """The bad versions as short prose, never an unbounded list."""
+        if self.all_versions:
+            return "all versions"
+        parts = list(self.bad_versions[:8])
+        for low, high, inclusive in self.bad_ranges[:4]:
+            parts.append(f"{low} up to {'and including ' if inclusive else 'but not including '}{high}" if high
+                         else f"{low} and later")
+        extra = len(self.bad_versions) - 8
+        return ", ".join(parts) + (f" and {extra} more" if extra > 0 else "")
+
+    @property
     def display_title(self) -> str:
-        return self.title or f"{self.package} {', '.join(self.bad_versions)} ({self.ecosystem})"
+        return self.title or f"{self.package} {self.versions_text} ({self.ecosystem})"
 
 
 @dataclass(frozen=True)

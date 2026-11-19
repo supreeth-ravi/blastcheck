@@ -61,11 +61,17 @@ class GitHub:
             raise GitHubError(exc.status, f"{method} {path}: {exc.message}") from exc
 
     def get(self, path: str, params: dict | None = None) -> object:
-        return self._call("GET", path, params).json()
+        try:
+            return self._call("GET", path, params).json()
+        except ValueError as exc:  # a cut-off or non-JSON body is a failed read, not a crash
+            raise GitHubError(0, f"GET {path}: unreadable response ({exc})") from exc
 
     def graphql(self, query: str) -> dict:
         """Run one GraphQL query. Raises GitHubError when no data comes back."""
-        result = self._call("POST", "graphql", payload={"query": query}).json()
+        try:
+            result = self._call("POST", "graphql", payload={"query": query}).json()
+        except ValueError as exc:
+            raise GitHubError(0, f"GraphQL: unreadable response ({exc})") from exc
         data = result.get("data") if isinstance(result, dict) else None
         if not isinstance(data, dict):
             errors = result.get("errors") if isinstance(result, dict) else None
@@ -113,9 +119,15 @@ class GitHub:
         issues = self.paginate(f"repos/{repo}/issues", {"state": "all", "labels": "blastcheck"})
         return next((i for i in issues if marker in (i.get("body") or "") and "pull_request" not in i), None)
 
-    def upsert_issue(self, repo: str, marker: str, title: str, body: str) -> str:
+    def upsert_issue(self, repo: str, marker: str, title: str, body: str, reopen: bool = True) -> str:
+        """Create the issue, or update it if one with this marker exists.
+
+        With reopen=False a closed issue is left exactly as it is: someone already dealt with it.
+        """
         existing = self.find_issue(repo, marker)
         payload = {"title": title, "body": body, "labels": ["blastcheck"]}
+        if existing and existing.get("state") == "closed" and not reopen:
+            return existing.get("html_url", "")
         if existing:
             result = self._call("PATCH", f"repos/{repo}/issues/{existing['number']}",
                                 payload={**payload, "state": "open"}).json()

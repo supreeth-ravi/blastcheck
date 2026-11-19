@@ -5,6 +5,7 @@ import configparser
 import json
 import re
 import tomllib
+from dataclasses import replace
 
 from ..models import Dep
 
@@ -135,6 +136,8 @@ def parse_conda_env(file: str, text: str) -> list[Dep]:
     `=` is a prefix match, so `name=1.2` becomes `==1.2.*`.
     """
     lines: list[str] = []
+    conda_lines: list[str] = []
+    conda_specs: dict[str, set[str]] = {}
     in_dependencies = False
     pip_indent: int | None = None
     for raw in text.splitlines():
@@ -161,10 +164,15 @@ def parse_conda_env(file: str, text: str) -> list[Dep]:
         conda = re.match(r"^([A-Za-z0-9][A-Za-z0-9._-]*)\s*=\s*([0-9][^=\s]*)(=.*)?$", value)
         if conda and "==" not in value:
             pinned_build = bool(conda.group(3))
-            lines.append(f"{conda.group(1)}=={conda.group(2)}" + ("" if pinned_build else ".*"))
-        else:
-            lines.append(value)
-    deps = parse_requirement_lines(file, lines)
+            value = f"{conda.group(1)}=={conda.group(2)}" + ("" if pinned_build else ".*")
+        lines.append(value)
+        conda_lines.append(value)
+        parsed = parse_requirement_lines(file, [value])
+        if parsed:
+            conda_specs.setdefault(parsed[0].name, set()).add(parsed[0].spec)
+    conda_names = {normalise(re.split(r"[=<>!~ ]", line, maxsplit=1)[0]) for line in conda_lines}
+    deps = [replace(dep, via="conda") if dep.name in conda_names and dep.spec in conda_specs.get(dep.name, ()) else dep
+            for dep in parse_requirement_lines(file, lines)]
     if lines and not deps:
         raise ValueError("environment file has dependencies but none could be read")
     return deps

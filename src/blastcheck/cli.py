@@ -8,7 +8,7 @@ import re
 import sys
 from pathlib import Path
 
-from . import __version__, confirm, incident as incident_mod, inventory, matcher, notify, report
+from . import __version__, confirm, incident as incident_mod, inventory, matcher, notify, report, watch
 from .branches import Settings
 from .github import GitHub, GitHubError, resolve_token
 from .models import AFFECTED, AT_RISK, INCOMPLETE, Incident
@@ -58,12 +58,19 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--url", help="article to read with Claude (needs blastcheck[ai] and a key)")
     source.add_argument("--incident", help="path to a saved incident JSON file")
     check.add_argument("--no-confirm", action="store_true", help="skip the OSV/registry confirmation lookup")
-    check.add_argument("--out", default=DEFAULT_OUT, help=f"folder for the report files (default {DEFAULT_OUT})")
-    check.add_argument("--issue-repo", help="owner/name of the repo to write the incident issue in")
-    check.add_argument("--allow-public-issue-repo", action="store_true",
+
+    sweep = sub.add_parser("watch", help="find known-malicious releases among the packages the org uses")
+    common(sweep)
+    sweep.add_argument("--recent-days", type=int, default=7,
+                       help="report loose version ranges only for advisories this recent (default 7)")
+
+    for p in (check, sweep):
+        p.add_argument("--out", default=DEFAULT_OUT, help=f"folder for the report files (default {DEFAULT_OUT})")
+        p.add_argument("--issue-repo", help="owner/name of the repo to write the incident issue in")
+        p.add_argument("--allow-public-issue-repo", action="store_true",
                        help="write the issue even if that repo is public (it will expose private repo names)")
-    check.add_argument("--notify", action="store_true", help="send to Slack/email if configured in the environment")
-    check.add_argument("--json", action="store_true", help="print the JSON summary to stdout")
+        p.add_argument("--notify", action="store_true", help="send to Slack/email if configured in the environment")
+        p.add_argument("--json", action="store_true", help="print the JSON summary to stdout")
     return parser
 
 
@@ -98,7 +105,8 @@ def get_inventory(args: argparse.Namespace, gh: GitHub) -> tuple[dict, tuple[str
     return result, skipped
 
 
-def write_issue(args: argparse.Namespace, marker: str, title: str, body: str) -> tuple[str, bool]:
+def write_issue(args: argparse.Namespace, marker: str, title: str, body: str, reopen: bool = True,
+                ) -> tuple[str, bool]:
     """Create or update the incident issue. Returns (issue URL, whether the repo is safe to publish to).
 
     A public repo is refused unless explicitly allowed, and so is one whose visibility could
@@ -117,7 +125,7 @@ def write_issue(args: argparse.Namespace, marker: str, title: str, body: str) ->
         say(f"could not check whether {args.issue_repo} is private, so nothing was published there: {exc}")
         return "", False
     try:
-        url = writer.upsert_issue(args.issue_repo, marker, title, body)
+        url = writer.upsert_issue(args.issue_repo, marker, title, body, reopen)
         say(f"issue: {url}")
         return url, True
     except GitHubError as exc:
@@ -140,15 +148,13 @@ def cmd_setup(args: argparse.Namespace) -> int:
     return 2 if problems else 0
 
 
-def cmd_check(args: argparse.Namespace) -> int:
-    incident = load_incident(args)
-    if not args.no_confirm:
-        incident = incident_mod.with_confirmation(incident, confirm.confirm(incident))
-    gh = GitHub(resolve_token())
-    inventories, skipped = get_inventory(args, gh)
-    results = matcher.match(incident, inventories.values())
-    worst = matcher.headline(results)
+def publish(args: argparse.Namespace, incident: Incident, results: tuple, inventories: dict, skipped: tuple[str, ...],
+            reopen: bool) -> tuple[dict, str, bool]:
+    """Write the report files, the issue, notices and run summary for one incident.
 
+    Returns (summary, issue URL, whether the target repo is safe to publish to).
+    """
+    worst = matcher.headline(results)
     body = report.issue_body(incident, results, inventories, args.org, skipped=skipped)
     summary = report.summary(incident, results, args.org, skipped, inventories)
     out = Path(args.out)
@@ -159,7 +165,7 @@ def cmd_check(args: argparse.Namespace) -> int:
 
     issue_url, publishable = "", True
     if args.issue_repo:
-        issue_url, publishable = write_issue(args, report.marker(incident), report.title(incident, results), body)
+        issue_url, publishable = write_issue(args, report.marker(incident), report.title(incident, results), body, reopen)
     if args.notify:
         text = notify.notice(report.HEADLINES[worst], incident.package, summary["reply"], issue_url)
         for outcome in notify.deliver(text, report.title(incident, results)):
@@ -170,6 +176,57 @@ def cmd_check(args: argparse.Namespace) -> int:
     if summary_file and publishable:
         with open(summary_file, "a") as handle:
             handle.write(body + "\n")
+    return summary, issue_url, publishable
+
+
+def cmd_watch(args: argparse.Namespace) -> int:
+    inventories, skipped = get_inventory(args, GitHub(resolve_token()))
+    result = watch.sweep(inventories.values(), args.recent_days)
+    unread = sorted(inv.repo for inv in inventories.values() if inv.errors or any(b.errors for b in inv.branches))
+    found = []
+    for match in result.matches:
+        summary, issue_url, _ = publish(args, match.incident, match.results, inventories, skipped, reopen=False)
+        found.append({"advisory": match.incident.advisory_id, "published": match.published[:10],
+                      "package": match.incident.package, "ecosystem": match.incident.ecosystem,
+                      "headline": summary["headline"], "repos": summary["repos"], "issue_url": issue_url})
+    line = (f"Asked OSV about {result.packages} packages used in {len(inventories)} repos: {result.advisories} malware "
+            f"advisories exist for them, {len(found)} match what the org uses"
+            + (f", {result.quiet} concern only versions the org does not use" if result.quiet else "") + ".")
+    caveats = list(result.notes)
+    if unread:
+        caveats.append(f"{len(unread)} repos could not be fully read, so the sweep did not cover them completely: "
+                       + ", ".join(unread[:10]))
+    if skipped:
+        caveats.append(f"{len(skipped)} archived repos were not checked")
+    if args.json:
+        sys.stdout.write(json.dumps({"owner": args.org, "packages": result.packages, "advisories": result.advisories,
+                                     "matches": found, "quiet": result.quiet, "caveats": caveats}, indent=2) + "\n")
+    else:
+        sys.stdout.write("\n" + line + "\n")
+        for item in found:
+            affected = item["repos"]["affected"] + item["repos"]["at_risk"]
+            sys.stdout.write(f"  {item['advisory']} {item['package']} ({item['ecosystem']}): {item['headline']} in "
+                             f"{', '.join(affected)} {item['issue_url']}\n")
+        for caveat in caveats:
+            sys.stdout.write(f"  note: {caveat}\n")
+    summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary_file and not found:
+        with open(summary_file, "a") as handle:  # counts only: safe to show in any repo
+            handle.write(f"### blastcheck daily sweep\n\n{line}\n")
+    return 1 if found else 0
+
+
+def cmd_check(args: argparse.Namespace) -> int:
+    incident = load_incident(args)
+    if not args.no_confirm:
+        incident = incident_mod.with_confirmation(incident, confirm.confirm(incident))
+    gh = GitHub(resolve_token())
+    inventories, skipped = get_inventory(args, gh)
+    results = matcher.match(incident, inventories.values())
+    worst = matcher.headline(results)
+
+    summary, issue_url, _ = publish(args, incident, results, inventories, skipped, reopen=True)
+    out = Path(args.out)
     if args.json:
         sys.stdout.write(json.dumps({**summary, "issue_url": issue_url}, indent=2) + "\n")
     else:
@@ -182,9 +239,11 @@ def cmd_check(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        return cmd_setup(args) if args.command == "setup" else cmd_check(args)
+        return {"setup": cmd_setup, "check": cmd_check, "watch": cmd_watch}[args.command](args)
     except incident_mod.IncidentError as exc:
         say(f"incident problem: {exc}")
+    except watch.WatchError as exc:
+        say(f"sweep problem: {exc}")
     except GitHubError as exc:
         say(f"GitHub problem: {exc}")
     except Exception as exc:  # last-resort boundary: show a clear message, exit non-zero

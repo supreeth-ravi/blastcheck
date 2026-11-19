@@ -29,7 +29,7 @@ def canonical_ecosystem(value: str) -> str:
 def validate(incident: Incident) -> Incident:
     if not _PACKAGE.match(incident.package or ""):
         raise IncidentError(f"package name looks wrong: {incident.package!r}")
-    if not incident.bad_versions:
+    if not incident.bad_versions and not incident.all_versions and not incident.bad_ranges:
         raise IncidentError("at least one bad version is required")
     for version in incident.bad_versions:
         if not _VERSION.match(version):

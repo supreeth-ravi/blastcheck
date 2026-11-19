@@ -151,7 +151,7 @@ def test_conda_environment_files_are_read():
     assert verdict(EVIL, {"ml/environment.yml": CONDA}) == AT_RISK
     pip_pinned = "dependencies:\n  - pip:\n    - evilpkg==1.0\n"
     assert verdict(EVIL, {"environment.yaml": pip_pinned}) == AFFECTED
-    assert verdict(EVIL, {"environment.yml": "dependencies:\n  - evilpkg=1.0=build7\n"}) == AFFECTED
+    assert verdict(EVIL, {"environment.yml": "dependencies:\n  - evilpkg=1.0=build7\n"}) == AT_RISK   # Conda, not pip
     assert verdict(EVIL, {"environment.yml": "dependencies:\n  - evilpkg=2.0\n"}) == SAFE_VERSION
 
 

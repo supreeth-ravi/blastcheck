@@ -11,6 +11,8 @@ from .models import (AFFECTED, AT_RISK, INCOMPLETE, NOT_USED, SAFE_VERSION, Bran
 from .parsers import LOCKS_FOR
 from .parsers.python import normalise
 
+CONDA_REASON = ("a Conda package has the same name and version as the bad release; Conda does not install from "
+                "this registry, so verify it is a name collision")
 SEVERITY = {AFFECTED: 4, AT_RISK: 3, INCOMPLETE: 2, SAFE_VERSION: 1, NOT_USED: 0}
 _REASONS = {
     AFFECTED: "a known-bad version is pinned",
@@ -31,11 +33,14 @@ def _same_package(incident: Incident, dep: Dep) -> bool:
 
 
 def _is_bad(incident: Incident, version: str) -> bool:
-    return any(versions.same(version, bad) for bad in incident.bad_versions)
+    return (incident.all_versions
+            or any(versions.same(version, bad) for bad in incident.bad_versions)
+            or any(versions.in_range(version, low, high, inclusive) for low, high, inclusive in incident.bad_ranges))
 
 
 def _could_pull_bad(incident: Incident, dep: Dep) -> bool:
-    return any(versions.accepts(incident.ecosystem, dep.spec, bad) for bad in incident.bad_versions)
+    # A range of bad versions cannot be compared with a loose specifier reliably: flag it.
+    return incident.all_versions or bool(incident.bad_ranges) or any(versions.accepts(incident.ecosystem, dep.spec, bad) for bad in incident.bad_versions)
 
 
 def _pinned_by_lock(dep: Dep, deps: Iterable[Dep]) -> bool:
@@ -55,9 +60,15 @@ def _evaluate(incident: Incident, all_deps: Iterable[Dep], errors: Iterable[str]
               ) -> tuple[str, tuple[Dep, ...], str]:
     """Verdict, the lines that justify it, and a reason, for one view of a repo's files."""
     deps = tuple(dep for dep in all_deps if _same_package(incident, dep))
-    pinned_bad = tuple(dep for dep in deps if dep.exact and dep.version and _is_bad(incident, dep.version))
+    pinned_bad = tuple(dep for dep in deps
+                       if incident.all_versions or (dep.exact and dep.version and _is_bad(incident, dep.version)))
+    direct = tuple(dep for dep in pinned_bad if dep.via != "conda")
+    if direct:
+        return AFFECTED, direct, _REASONS[AFFECTED]
     if pinned_bad:
-        return AFFECTED, pinned_bad, _REASONS[AFFECTED]
+        # A Conda package that shares its name with the bad release. Conda does not install from
+        # this registry, so this is a name collision to verify, not a confirmed install.
+        return AT_RISK, pinned_bad, CONDA_REASON
     loose = tuple(dep for dep in deps
                   if not dep.exact and _could_pull_bad(incident, dep) and not _pinned_by_lock(dep, deps))
     if loose:

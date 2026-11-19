@@ -11,7 +11,7 @@ from . import node, other, python
 Parser = Callable[[str, str], list[Dep]]
 
 # Bump whenever a parser changes what it extracts, so cached inventories are rebuilt.
-PARSER_VERSION = 5
+PARSER_VERSION = 6
 
 _BY_NAME: dict[str, Parser] = {
     "pyproject.toml": python.parse_pyproject,
