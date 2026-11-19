@@ -92,23 +92,31 @@ def get_inventory(args: argparse.Namespace, gh: GitHub) -> tuple[dict, tuple[str
     return result, skipped
 
 
-def write_issue(args: argparse.Namespace, marker: str, title: str, body: str) -> str:
-    """Create or update the incident issue. Refuses a public repo unless explicitly allowed."""
+def write_issue(args: argparse.Namespace, marker: str, title: str, body: str) -> tuple[str, bool]:
+    """Create or update the incident issue. Returns (issue URL, whether the repo is safe to publish to).
+
+    A public repo is refused unless explicitly allowed, and so is one whose visibility could
+    not be established: the report names private repos and files.
+    """
     if not _REPO.match(args.issue_repo):
         say(f"--issue-repo must look like owner/name, not {args.issue_repo!r}; no issue written")
-        return ""
+        return "", False
     writer = GitHub(resolve_token(names=("BLASTCHECK_ISSUE_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")))
     try:
         if not args.allow_public_issue_repo and not writer.is_private(args.issue_repo):
-            say(f"{args.issue_repo} is public, so no issue was written: the report names private repos and files. "
-                "Use a private repo, or pass --allow-public-issue-repo.")
-            return ""
+            say(f"{args.issue_repo} is public, so no issue or run summary was written: the report names private "
+                "repos and files. Use a private repo, or pass --allow-public-issue-repo.")
+            return "", False
+    except GitHubError as exc:
+        say(f"could not check whether {args.issue_repo} is private, so nothing was published there: {exc}")
+        return "", False
+    try:
         url = writer.upsert_issue(args.issue_repo, marker, title, body)
         say(f"issue: {url}")
-        return url
+        return url, True
     except GitHubError as exc:
         say(f"could not write the issue in {args.issue_repo}: {exc}")
-        return ""
+        return "", True
 
 
 def cmd_setup(args: argparse.Namespace) -> int:
@@ -142,16 +150,17 @@ def cmd_check(args: argparse.Namespace) -> int:
     (out / f"{incident.slug}.json").write_text(json.dumps(summary, indent=2) + "\n")
     incident_mod.save(incident, out / f"{incident.slug}.incident.json")
 
-    issue_url = ""
+    issue_url, publishable = "", True
     if args.issue_repo:
-        issue_url = write_issue(args, report.marker(incident), report.title(incident, results), body)
+        issue_url, publishable = write_issue(args, report.marker(incident), report.title(incident, results), body)
     if args.notify:
         text = notify.notice(report.HEADLINES[worst], incident.package, summary["reply"], issue_url)
         for outcome in notify.deliver(text, report.title(incident, results)):
             say(outcome)
 
+    # The run summary is as visible as the repo the workflow runs in: same gate as the issue.
     summary_file = os.environ.get("GITHUB_STEP_SUMMARY")
-    if summary_file:
+    if summary_file and publishable:
         with open(summary_file, "a") as handle:
             handle.write(body + "\n")
     if args.json:

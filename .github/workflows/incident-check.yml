@@ -26,6 +26,10 @@ on:
       org:
         description: "Org to check (default: the owner of this repo)"
         required: false
+      allow_public:
+        description: "Run even though this repo is public (logs, artifacts and the issue will expose private repo names)"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -40,6 +44,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
+      - name: Refuse to run in a public repo
+        # Logs, the run summary, the cache, the artifact and the issue are as visible as this repo.
+        if: ${{ github.event.repository.private != true && inputs.allow_public != true }}
+        run: |
+          echo "::error::This repo is public. The report names private repos and files, so the check will not run here. Make the repo private, or tick allow_public."
+          exit 3
+
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
@@ -71,6 +82,7 @@ jobs:
           IN_BAD: ${{ inputs.bad_versions }}
           IN_LAST_CLEAN: ${{ inputs.last_clean }}
           IN_ORG: ${{ inputs.org || github.repository_owner }}
+          IN_ALLOW_PUBLIC: ${{ inputs.allow_public }}
           BLASTCHECK_ORG_TOKEN: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
           BLASTCHECK_ISSUE_TOKEN: ${{ github.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -86,7 +98,8 @@ jobs:
             echo "::error::Add the BLASTCHECK_ORG_TOKEN secret: a token with read access to the org's repos."
             exit 3
           fi
-          args=(check --org "$IN_ORG" --issue-repo "$GITHUB_REPOSITORY" --notify)
+          args=(check --org "$IN_ORG" --issue-repo "$GITHUB_REPOSITORY" --notify --quiet)
+          if [ "$IN_ALLOW_PUBLIC" = "true" ]; then args+=(--allow-public-issue-repo); fi
           if [ -n "$IN_URL" ]; then
             args+=(--url "$IN_URL")
           else

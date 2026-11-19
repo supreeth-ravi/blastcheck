@@ -191,3 +191,29 @@ def test_cli_reports_github_failures(monkeypatch, capsys):
         raise GitHubError(401, "no GitHub token found")
     monkeypatch.setattr(cli, "resolve_token", boom)
     assert cli.main(["setup", "--org", "acme-labs"]) == 3 and "no GitHub token" in capsys.readouterr().err
+
+
+def test_public_issue_repo_gets_no_issue_and_no_run_summary(wired_cli, monkeypatch, capsys):
+    gh, base, tmp = wired_cli
+    summary = tmp / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    args = ["check", *base, "--package", "agent-framework", "--ecosystem", "pypi", "--bad", "1.26.2",
+            "--no-confirm", "--out", str(tmp / "out")]
+    cli.main([*args, "--issue-repo", "acme-labs/scan-public"])
+    assert gh.issues == [] and not summary.exists()
+    assert "is public" in capsys.readouterr().err
+    cli.main([*args, "--issue-repo", "acme-labs/scan-public", "--allow-public-issue-repo"])
+    assert len(gh.issues) == 1 and "AFFECTED" in summary.read_text()
+
+
+def test_unknown_visibility_is_treated_as_public(wired_cli, monkeypatch, capsys):
+    gh, base, tmp = wired_cli
+    summary = tmp / "summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+
+    def boom(repo):
+        raise GitHubError(404, "not found")
+    gh.is_private = boom
+    cli.main(["check", *base, "--package", "agent-framework", "--ecosystem", "pypi", "--bad", "1.26.2",
+              "--no-confirm", "--out", str(tmp / "out"), "--issue-repo", "acme-labs/scan"])
+    assert gh.issues == [] and not summary.exists() and "could not check whether" in capsys.readouterr().err
