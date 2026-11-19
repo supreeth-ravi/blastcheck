@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6 — 2026-11-19
+
+- The project now lives at `supreeth-ravi/blastcheck`. Workflows should use
+  `supreeth-ravi/blastcheck@v0`.
+
 ## 0.1.5 — 2026-11-19
 
 - The drafted reply states only what the scan did. Follow-ups are worded as recommended next

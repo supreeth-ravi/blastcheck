@@ -57,7 +57,7 @@ If you find a case where one of these does not hold, that is a vulnerability.
   workflow there can read its secrets.
 - Give `BLASTCHECK_ORG_TOKEN` read-only **Contents** access and nothing else.
 - For a stricter setup, put the secrets in a GitHub Environment restricted to the default
-  branch, and pin `phronetic-ai/blastcheck` in your workflows to a commit SHA rather than a tag.
+  branch, and pin `supreeth-ravi/blastcheck` in your workflows to a commit SHA rather than a tag.
 
 ## Supported versions
 

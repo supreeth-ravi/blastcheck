@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: phronetic-ai/blastcheck@v0   # v0 follows the latest 0.x release; for a stricter setup, pin to a commit SHA
+      - uses: supreeth-ravi/blastcheck@v0   # v0 follows the latest 0.x release; for a stricter setup, pin to a commit SHA
         with:
           mode: watch
           org-token: ${{ secrets.BLASTCHECK_ORG_TOKEN }}

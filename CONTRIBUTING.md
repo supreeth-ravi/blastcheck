@@ -55,4 +55,4 @@ checks dependency risk should not bring any of its own.
 ## Releases
 
 Each release gets a `vX.Y.Z` tag, a GitHub release and a changelog entry. The `v0` tag moves to
-the latest 0.x release, so workflows that use `phronetic-ai/blastcheck@v0` pick up fixes.
+the latest 0.x release, so workflows that use `supreeth-ravi/blastcheck@v0` pick up fixes.
