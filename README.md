@@ -10,7 +10,7 @@
 When a dependency you rely on is hijacked or found vulnerable, blastcheck checks every repo in your GitHub org and drafts the reply. It runs in your own setup, on your own credentials. Nothing is hosted and your code is never sent anywhere.
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/phronetic-ai/blastcheck/test.yml?branch=main&style=flat-square&label=tests)](https://github.com/phronetic-ai/blastcheck/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/version-0.1.3-111?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.4-111?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111?style=flat-square)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-%E2%89%A53.11-111?style=flat-square)](https://www.python.org)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-111?style=flat-square)](pyproject.toml)
@@ -204,6 +204,12 @@ None of these exist yet. Today blastcheck is the fast, exact detection layer.
 You need Python 3.11+ and read access to the org's repos on GitHub. There are no runtime dependencies.
 
 ```bash
+pipx install git+https://github.com/phronetic-ai/blastcheck
+```
+
+Or from a checkout:
+
+```bash
 git clone https://github.com/phronetic-ai/blastcheck && cd blastcheck
 pip install .            # add ".[ai]" if you want to paste article links
 ```
@@ -224,12 +230,12 @@ The first run reads every repo (about a minute for 150 repos). Later runs reuse 
 The code lives here; your results never do. You call blastcheck from a **private repo of your own**, and every issue, log, cache and report stays in that repo.
 
 1. Pick or create a **private** repo in your org to hold the results, for example `security-scan`.
-2. Create a fine-grained token: resource owner your org, all repositories, read-only **Contents** (Metadata is added automatically).
+2. Create a fine-grained token: resource owner your org, all repositories or only the ones you choose, read-only **Contents** (Metadata is added automatically).
 3. Add it to that repo as a secret named `BLASTCHECK_ORG_TOKEN` (Settings → Secrets and variables → Actions).
 4. Copy [`examples/incident-check.yml`](examples/incident-check.yml) and [`examples/daily-watch.yml`](examples/daily-watch.yml) into its `.github/workflows/` folder. Each is about 40 lines and calls this action:
 
    ```yaml
-   - uses: phronetic-ai/blastcheck@v0.1.3
+   - uses: phronetic-ai/blastcheck@v0
      with:
        mode: check            # or: watch
        org-token: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
@@ -240,6 +246,8 @@ The code lives here; your results never do. You call blastcheck from a **private
 5. Open **Actions → Incident check → Run workflow**, enter the package and bad versions, and run.
 
 The result is an issue in your repo, labelled `blastcheck`. The daily watch starts running by itself at 02:30 UTC.
+
+`@v0` follows the latest 0.x release. To pin exactly, use a release tag such as `@v0.1.4` or a commit SHA.
 
 **The scan covers exactly the repos the token has access to.** Give it the whole org or only a chosen set; every report states how many private and public repos were in scope. If you want a guard against a token losing access, set `expect-repos` and the run stops when it sees fewer.
 
@@ -350,6 +358,12 @@ Keep the scan repo private and limit who can push to it: anyone who can run a mo
 <summary><b>Can it change anything in our repos?</b></summary>
 
 No. It needs a read-only token, and it contains no code that writes to the repos it scans. The only thing it writes is an issue in the scan repo you point it at.
+</details>
+
+<details>
+<summary><b>Why is this not a one-click GitHub App?</b></summary>
+
+A GitHub App is only an identity; its work runs on the vendor's servers, which then receive your repo contents. blastcheck is a GitHub Action instead, so the job runs inside your own GitHub and nothing is handed to a third party. The price is a few minutes of setup: one token and two workflow files.
 </details>
 
 <details>

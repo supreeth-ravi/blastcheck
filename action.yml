@@ -44,7 +44,7 @@ inputs:
     required: false
     default: ""
   expect-repos:
-    description: "Stop with an error if fewer than this many repos are visible to the token (recommended: about 90% of your repo count)"
+    description: "Optional guard: stop with an error if fewer than this many repos are visible to the token (0 = off)"
     required: false
     default: "0"
   recent-days:
@@ -56,27 +56,35 @@ inputs:
     required: false
     default: "false"
   anthropic-api-key:
+    description: "Claude API key, needed only to read an article link (url)"
     required: false
     default: ""
   slack-webhook:
+    description: "Slack incoming-webhook URL for a short notice (optional)"
     required: false
     default: ""
   smtp-host:
+    description: "Mail server host for a short notice by email (optional)"
     required: false
     default: ""
   smtp-port:
+    description: "Mail server port"
     required: false
     default: ""
   smtp-user:
+    description: "Mail server user"
     required: false
     default: ""
   smtp-password:
+    description: "Mail server password"
     required: false
     default: ""
   mail-from:
+    description: "Sender address for the email notice"
     required: false
     default: ""
   mail-to:
+    description: "Recipient address for the email notice"
     required: false
     default: ""
 

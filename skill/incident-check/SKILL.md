@@ -23,7 +23,7 @@ not read source code.
    and, if there is more than one, ask which.
 
 3. **Check that the tool is installed.** Run `blastcheck --version`. If it is missing, tell the
-   user to install it (`pipx install blastcheck`, or `pip install .` from a checkout) and stop.
+   user to install it (`pipx install git+https://github.com/phronetic-ai/blastcheck`, or `pip install .` from a checkout) and stop.
 
 4. **Run the check.** Pass every value as its own argument:
 

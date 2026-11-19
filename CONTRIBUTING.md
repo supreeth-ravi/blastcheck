@@ -40,8 +40,9 @@ checks dependency risk should not bring any of its own.
    different, so cached inventories are rebuilt.
 4. **Invented names only** in tests, fixtures and examples: no real organisation, repo or person.
 5. **Tests must not use the network.** They fail if they try.
-7. **This repo never runs a scan.** Its only workflow is the tests. Scan workflows live in `examples/` so that no org's results can end up here.
 6. **Anything that reaches markdown is escaped** with `report.code()` or `report.plain()`.
+7. **This repo never runs a scan.** Its only workflow is the tests. Scan workflows live in
+   `examples/` so that no org's results can end up here.
 
 ## Adding a dependency file format
 
@@ -50,3 +51,8 @@ checks dependency risk should not bring any of its own.
 2. Register it in `_BY_NAME` in `parsers/__init__.py`, and in `LOCKS_FOR` if it is a lock file.
 3. Add fixtures to `tests/test_parsers.py` and a verdict test.
 4. Bump `PARSER_VERSION` and list the format in the README.
+
+## Releases
+
+Each release gets a `vX.Y.Z` tag, a GitHub release and a changelog entry. The `v0` tag moves to
+the latest 0.x release, so workflows that use `phronetic-ai/blastcheck@v0` pick up fixes.

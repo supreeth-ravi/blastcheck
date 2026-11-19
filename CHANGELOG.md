@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4 — 2026-11-19
+
+- Release housekeeping, no change to verdicts. A moving `v0` tag now follows the latest 0.x
+  release and the example workflows use it.
+- Every action input has a description; `expect-repos` is described as the opt-in guard it is.
+- The skill and README give an install command that works (`pipx install git+…`).
+
 ## 0.1.3 — 2026-11-19
 
 - A token scoped to a subset of repos is a normal setup, not a problem: the visibility warning is
