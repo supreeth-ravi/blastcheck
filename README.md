@@ -9,7 +9,7 @@
 
 When a dependency you rely on is hijacked or found vulnerable, blastcheck checks every repo in your GitHub org and drafts the reply. It runs in your own setup, on your own credentials. Nothing is hosted and your code is never sent anywhere.
 
-[![Tests](https://img.shields.io/github/actions/workflow/status/supreeth-ravi/blastcheck/test.yml?branch=main&style=flat-square&label=tests)](https://github.com/supreeth-ravi/blastcheck/actions/workflows/test.yml)
+[![Tests](https://github.com/supreeth-ravi/blastcheck/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/supreeth-ravi/blastcheck/actions/workflows/test.yml)
 [![Version](https://img.shields.io/badge/version-0.1.6-111?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111?style=flat-square)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-%E2%89%A53.11-111?style=flat-square)](https://www.python.org)
