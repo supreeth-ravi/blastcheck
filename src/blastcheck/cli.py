@@ -180,9 +180,7 @@ def cmd_setup(args: argparse.Namespace) -> int:
         say(f"  {len(skipped)} archived repos skipped (use --include-archived to read them)")
     private = sum(1 for i in inventories.values() if i.visibility == "private")
     say(f"  {private} private and {len(inventories) - private} public repos are visible to this token.")
-    if report.visibility_warning(inventories):
-        say(f"  WARNING: {report.visibility_warning(inventories)}")
-    say("If a repo you expect is missing from the count, the token cannot see it.")
+    say("The scan covers exactly the repos this token has access to.")
     return 2 if problems else 0
 
 
@@ -237,9 +235,6 @@ def cmd_watch(args: argparse.Namespace) -> int:
                        + ", ".join(unread[:10]))
     if skipped:
         caveats.append(f"{len(skipped)} archived repos were not checked")
-    visibility = report.visibility_warning(inventories)
-    if visibility:
-        caveats.append(visibility)
     if args.json:
         sys.stdout.write(json.dumps({"owner": args.org, "packages": result.packages, "advisories": result.advisories,
                                      "matches": found, "quiet": result.quiet, "caveats": caveats}, indent=2) + "\n")
@@ -255,9 +250,6 @@ def cmd_watch(args: argparse.Namespace) -> int:
     if summary_file and not found:
         with open(summary_file, "a") as handle:  # counts only: safe to show in any repo
             handle.write(f"### blastcheck daily sweep\n\n{line}\n")
-            for caveat in caveats:
-                if caveat == visibility:
-                    handle.write(f"\n> **Warning: {caveat}**\n")
     return 1 if found else 0
 
 
@@ -276,8 +268,6 @@ def cmd_check(args: argparse.Namespace) -> int:
     if args.json:
         sys.stdout.write(json.dumps({**summary, "issue_url": issue_url}, indent=2) + "\n")
     else:
-        if summary["visibility_warning"]:
-            sys.stdout.write(f"\nWARNING: {summary['visibility_warning']}\n")
         sys.stdout.write(f"\n{report.HEADLINES[worst]}\n{incident.confirmation.status}: "
                          f"{'; '.join(incident.confirmation.evidence)}\n\n{summary['reply']}\n\n"
                          f"Full report: {out / (incident.slug + '.md')}\n")

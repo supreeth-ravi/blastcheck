@@ -127,30 +127,10 @@ def visible_counts(inventories: dict[str, RepoInventory]) -> tuple[int, int]:
     return private, public
 
 
-def visibility_warning(inventories: dict[str, RepoInventory]) -> str:
-    """A warning when almost nothing private is visible, else an empty string.
-
-    A token cannot list what it has no access to, so missing private repos are invisible, not
-    errors. An org with many private repos and a token that sees one or none of them is the
-    commonest way to get a confident answer about a tenth of the code.
-    """
-    private, public = visible_counts(inventories)
-    total = private + public
-    if total == 0 or private * 5 >= total:
-        return ""
-    seen = "No private repos were" if private == 0 else f"Only {private} of the {total} repos"
-    tail = "visible to the token" if private == 0 else "visible to the token are private"
-    return (f"{seen} {tail}. If the org has more private repos, they were NOT checked: give the token read access "
-            "to all repositories and run again.")
-
-
-def _coverage(results: tuple[RepoResult, ...], skipped: tuple[str, ...], public_only: bool = False) -> tuple[str, str]:
+def _coverage(results: tuple[RepoResult, ...], skipped: tuple[str, ...]) -> tuple[str, str]:
     """(opening words, caveat sentence). Says "all" only when nothing was left unread or skipped."""
     unread = len(_by_verdict(results, INCOMPLETE))
     caveats = []
-    if public_only:
-        caveats.append("our access token can see almost none of the private repos, so those have not been "
-                       "checked yet")
     if unread:
         caveats.append(f"{unread} {'repo' if unread == 1 else 'repos'} could not be fully read, so this is not yet "
                        f"a complete answer; we are checking those by hand")
@@ -169,14 +149,10 @@ def branch_coverage(inventories: dict[str, RepoInventory]) -> tuple[int, int, li
 
 
 def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[str, ...] = (),
-          branches_checked: int = 0, public_only: bool = False) -> str:
+          branches_checked: int = 0) -> str:
     """A short plain-text answer suitable for forwarding. Never overstates what was checked."""
     worst = headline(results)
-    opening, caveat = _coverage(results, skipped, public_only)
-    if public_only and worst in (SAFE_VERSION, NOT_USED):
-        bad, name = incident.versions_text, incident.package
-        return (f"We checked the {len(results)} repos our scanner can see and found no use of the affected versions of {name} "
-                f"({bad}) there. This is not yet an answer for the organisation:{caveat.rstrip('.').lstrip()}.")
+    opening, caveat = _coverage(results, skipped)
     affected = [r.repo for r in _by_verdict(results, AFFECTED)]
     at_risk = [r.repo for r in _by_verdict(results, AT_RISK)]
     bad = incident.versions_text
@@ -208,14 +184,11 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
     worst = headline(results)
     counts = Counter(r.verdict for r in results)
     checked, differing, branch_notes = branch_coverage(inventories)
-    warning = visibility_warning(inventories)
-    public_only = bool(warning)
     private_seen, public_seen = visible_counts(inventories)
     lines = [
         marker(incident),
         f"## {HEADLINES[worst]}",
         "",
-        *([f"> **Warning: {warning}**", ""] if warning else []),
         f"**Incident:** {plain(incident.display_title)}",
         f"**Package:** {code(incident.package)} ({incident.ecosystem}) — bad versions: "
         + ("all versions" if incident.all_versions else ", ".join(code(v) for v in incident.bad_versions[:40]))
@@ -228,7 +201,7 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
         _confirmation_line(incident),
         "",
         f"Checked **{len(results)}** repos in {code(owner)} on {now:%Y-%m-%d %H:%M} UTC"
-        + (f" ({private_seen} private and {public_seen} public were visible to the token)." if private_seen + public_seen else ".")
+        + (f": the {private_seen} private and {public_seen} public repos the token has access to." if private_seen + public_seen else ".")
         + (f" **{len(skipped)}** archived repos were skipped." if skipped else "")
         + (f" Besides each default branch, **{checked}** other branches were checked (deploy-named or recently "
            f"pushed); {differing} of them differ in their dependency files." if checked else ""),
@@ -258,7 +231,7 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
             lines.append(f"- … and {len(unread) - MAX_ROWS} more")
         lines.append("")
     lines += ["### What to do", "", *_checklist(incident, results, skipped), "", "### Ready-to-send reply", "",
-              "> " + plain(reply(incident, results, skipped, checked, public_only), 2000), ""]
+              "> " + plain(reply(incident, results, skipped, checked), 2000), ""]
     if incident.sources:
         lines += ["### Sources", "", *[f"- <{source}>" for source in incident.sources], ""]
     pushed = [inv.pushed_at for inv in inventories.values() if inv.pushed_at]
@@ -280,8 +253,6 @@ def summary(incident: Incident, results: tuple[RepoResult, ...], owner: str, ski
             inventories: dict[str, RepoInventory] | None = None) -> dict:
     counts = Counter(r.verdict for r in results)
     checked, differing, branch_notes = branch_coverage(inventories or {})
-    warning = visibility_warning(inventories or {})
-    public_only = bool(warning)
     private_seen, public_seen = visible_counts(inventories or {})
     return {
         "owner": owner,
@@ -294,12 +265,11 @@ def summary(incident: Incident, results: tuple[RepoResult, ...], owner: str, ski
         "archived_skipped": list(skipped),
         "visible_private_repos": private_seen,
         "visible_public_repos": public_seen,
-        "visibility_warning": warning,
         "other_branches_checked": checked,
         "other_branches_differing": differing,
         "branch_notes": branch_notes,
         "branch_findings": sorted({f"{r.repo}@{dep.ref}" for r in results for dep in r.evidence if dep.ref}),
         "counts": dict(counts),
         "repos": {v: [r.repo for r in _by_verdict(results, v)] for v in (AFFECTED, AT_RISK, SAFE_VERSION, INCOMPLETE)},
-        "reply": reply(incident, results, skipped, checked, public_only),
+        "reply": reply(incident, results, skipped, checked),
     }

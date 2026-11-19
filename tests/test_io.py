@@ -215,24 +215,20 @@ def test_in_ci_a_public_or_unverifiable_repo_stops_everything_before_any_read(wi
     assert cli.main([*args, "--issue-repo", "acme-labs/scan-public", "--allow-public-issue-repo"]) == 1
 
 
-def test_a_token_that_sees_almost_no_private_repos_is_called_out_everywhere(wired_cli, capsys):
+def test_the_report_states_the_scope_without_nagging_about_repos_outside_it(wired_cli, capsys):
     gh, base, tmp = wired_cli
     gh.repos = {f"open-{i}": {"files": {"requirements.txt": "flask==3.0.0\n"}, "public": True} for i in range(14)}
-    gh.repos["the-scan-repo"] = {"files": {}}                       # one private repo, as with a narrowly scoped token
+    gh.repos["the-scan-repo"] = {"files": {}}                       # a deliberately narrow token
     args = ["check", *base, "--package", "agent-framework", "--ecosystem", "pypi", "--bad", "1.26.2", "--no-confirm",
             "--out", str(tmp / "out"), "--issue-repo", "acme-labs/scan"]
     assert cli.main(args) == 0
     out = capsys.readouterr().out
-    assert "WARNING: Only 1 of the 15 repos visible to the token are private" in out
-    assert "We checked the 15 repos our scanner can see" in out and "We checked all" not in out
+    assert "WARNING" not in out and "We checked all 15 repos" in out
     body = gh.issues[0][2]
-    assert "**Warning: Only 1 of the 15 repos" in body and "(1 private and 14 public were visible to the token)" in body
+    assert "the 1 private and 14 public repos the token has access to" in body and "Warning" not in body
     assert cli.main(["setup", *base]) == 0
-    assert "1 private and 14 public repos are visible" in capsys.readouterr().err
-
-    gh.repos.pop("the-scan-repo")
-    assert cli.main([*args[:-2], "--cache", str(tmp / "b.json")]) == 0
-    assert "WARNING: No private repos were visible to the token" in capsys.readouterr().out
+    err = capsys.readouterr().err
+    assert "1 private and 14 public repos are visible" in err and "exactly the repos this token has access to" in err
 
 
 def test_expect_repos_stops_the_run_when_too_few_are_visible(wired_cli, capsys):
@@ -242,12 +238,3 @@ def test_expect_repos_stops_the_run_when_too_few_are_visible(wired_cli, capsys):
     assert cli.main([*args, "--expect-repos", "100"]) == 3 and gh.issues == []
     assert "only 8 repos are visible to the token but at least 100 were expected" in capsys.readouterr().err
     assert cli.main([*args, "--expect-repos", "8"]) == 1 and len(gh.issues) == 1
-
-
-def test_a_mixed_or_private_org_gets_no_visibility_warning(wired_cli, capsys):
-    gh, base, tmp = wired_cli
-    gh.repos = {"svc-ok": {"files": {"requirements.txt": "flask==3.0.0\n"}}, "open-one": {"files": {}, "public": True}}
-    assert cli.main(["check", *base, "--package", "agent-framework", "--ecosystem", "pypi", "--bad", "1.26.2",
-                     "--no-confirm", "--out", str(tmp / "out")]) == 0
-    out = capsys.readouterr().out
-    assert "WARNING" not in out and "We checked all 2 repos" in out

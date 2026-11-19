@@ -10,7 +10,7 @@
 When a dependency you rely on is hijacked or found vulnerable, blastcheck checks every repo in your GitHub org and drafts the reply. It runs in your own setup, on your own credentials. Nothing is hosted and your code is never sent anywhere.
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/phronetic-ai/blastcheck/test.yml?branch=main&style=flat-square&label=tests)](https://github.com/phronetic-ai/blastcheck/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/version-0.1.2-111?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.3-111?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111?style=flat-square)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-%E2%89%A53.11-111?style=flat-square)](https://www.python.org)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-111?style=flat-square)](pyproject.toml)
@@ -229,7 +229,7 @@ The code lives here; your results never do. You call blastcheck from a **private
 4. Copy [`examples/incident-check.yml`](examples/incident-check.yml) and [`examples/daily-watch.yml`](examples/daily-watch.yml) into its `.github/workflows/` folder. Each is about 40 lines and calls this action:
 
    ```yaml
-   - uses: phronetic-ai/blastcheck@v0.1.2
+   - uses: phronetic-ai/blastcheck@v0.1.3
      with:
        mode: check            # or: watch
        org-token: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
@@ -241,7 +241,7 @@ The code lives here; your results never do. You call blastcheck from a **private
 
 The result is an issue in your repo, labelled `blastcheck`. The daily watch starts running by itself at 02:30 UTC.
 
-**Check the token can see your private repos.** A token cannot list repos it has no access to, so they are simply missing, not reported as errors. Every report states how many private and public repos were visible and warns when almost none are private. Set `expect-repos` to about 90% of your repo count and the run stops instead of answering for a fraction of the org.
+**The scan covers exactly the repos the token has access to.** Give it the whole org or only a chosen set; every report states how many private and public repos were in scope. If you want a guard against a token losing access, set `expect-repos` and the run stops when it sees fewer.
 
 If the repo you run it from is public, blastcheck stops before reading anything, because its logs, cache and issues would expose your private repo names.
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 — 2026-11-19
+
+- A token scoped to a subset of repos is a normal setup, not a problem: the visibility warning is
+  gone. Reports state the scope ("the N private and M public repos the token has access to").
+  `expect-repos` remains as an opt-in guard.
+
 ## 0.1.2 — 2026-11-19
 
 - The visibility warning now also fires when only a small share of the visible repos is private,

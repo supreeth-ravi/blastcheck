@@ -21,9 +21,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: phronetic-ai/blastcheck@v0.1.2   # for a stricter setup, pin to a commit SHA
+      - uses: phronetic-ai/blastcheck@v0.1.3   # for a stricter setup, pin to a commit SHA
         with:
           mode: watch
           org-token: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
-          # expect-repos: 100   # recommended: about 90% of your repo count; the run stops if the token sees fewer
+          # expect-repos: 100   # optional: stop if the token sees fewer repos than this
           slack-webhook: ${{ secrets.BLASTCHECK_SLACK_WEBHOOK }}
