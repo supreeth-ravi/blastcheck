@@ -43,6 +43,10 @@ inputs:
     description: "check: article link to read with Claude instead of package/versions (needs anthropic-api-key)"
     required: false
     default: ""
+  expect-repos:
+    description: "Stop with an error if fewer than this many repos are visible to the token (recommended: about 90% of your repo count)"
+    required: false
+    default: "0"
   recent-days:
     description: "watch: report loose version ranges only for advisories this recent"
     required: false
@@ -111,6 +115,7 @@ runs:
         IN_LAST_CLEAN: ${{ inputs.last-clean }}
         IN_URL: ${{ inputs.url }}
         IN_RECENT_DAYS: ${{ inputs.recent-days }}
+        IN_EXPECT_REPOS: ${{ inputs.expect-repos }}
         IN_ALLOW_PUBLIC: ${{ inputs.allow-public }}
         BLASTCHECK_ORG_TOKEN: ${{ inputs.org-token }}
         BLASTCHECK_ISSUE_TOKEN: ${{ inputs.issue-token }}
@@ -127,7 +132,8 @@ runs:
           echo "::error::The org-token input is empty. Add a secret holding a token with read-only Contents access to the org's repos and pass it as org-token."
           exit 3
         fi
-        common=(--org "$IN_ORG" --issue-repo "$GITHUB_REPOSITORY" --notify --quiet)
+        case "$IN_EXPECT_REPOS" in ''|*[!0-9]*) IN_EXPECT_REPOS=0 ;; esac
+        common=(--org "$IN_ORG" --issue-repo "$GITHUB_REPOSITORY" --notify --quiet --expect-repos "$IN_EXPECT_REPOS")
         if [ "$IN_ALLOW_PUBLIC" = "true" ]; then common+=(--allow-public-issue-repo); fi
         case "$IN_MODE" in
           watch)

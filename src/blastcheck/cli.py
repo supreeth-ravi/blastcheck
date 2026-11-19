@@ -34,6 +34,8 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--cache", default=DEFAULT_CACHE, help=f"inventory cache file (default {DEFAULT_CACHE})")
         p.add_argument("--no-cache", action="store_true", help="re-read every repo")
         p.add_argument("--include-archived", action="store_true")
+        p.add_argument("--expect-repos", type=int, default=0,
+                       help="stop with an error if fewer than this many repos are visible to the token")
         p.add_argument("--no-branches", action="store_true", help="read default branches only")
         p.add_argument("--branch-days", type=int, default=30,
                        help="also read branches pushed within this many days (default 30; 0 = deploy-named only)")
@@ -101,6 +103,10 @@ def get_inventory(args: argparse.Namespace, gh: GitHub) -> tuple[dict, tuple[str
     result, skipped = inventory.build(gh, args.org, cache, args.include_archived, args.workers, progress, settings)
     if not result:
         raise GitHubError(404, f"no repos visible in {args.org!r}; check the org name and the token's access")
+    if len(result) + len(skipped) < args.expect_repos:
+        raise GitHubError(403, f"only {len(result) + len(skipped)} repos are visible to the token but at least "
+                               f"{args.expect_repos} were expected; the token is probably missing access to "
+                               "private repos, so nothing was reported")
     inventory.save_cache(args.cache, args.org, result, settings)
     return result, skipped
 
@@ -174,8 +180,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
         say(f"  {len(skipped)} archived repos skipped (use --include-archived to read them)")
     private = sum(1 for i in inventories.values() if i.visibility == "private")
     say(f"  {private} private and {len(inventories) - private} public repos are visible to this token.")
-    if report.only_public_visible(inventories):
-        say(f"  WARNING: {report.PUBLIC_ONLY_WARNING}")
+    if report.visibility_warning(inventories):
+        say(f"  WARNING: {report.visibility_warning(inventories)}")
     say("If a repo you expect is missing from the count, the token cannot see it.")
     return 2 if problems else 0
 
@@ -231,8 +237,9 @@ def cmd_watch(args: argparse.Namespace) -> int:
                        + ", ".join(unread[:10]))
     if skipped:
         caveats.append(f"{len(skipped)} archived repos were not checked")
-    if report.only_public_visible(inventories):
-        caveats.append(report.PUBLIC_ONLY_WARNING)
+    visibility = report.visibility_warning(inventories)
+    if visibility:
+        caveats.append(visibility)
     if args.json:
         sys.stdout.write(json.dumps({"owner": args.org, "packages": result.packages, "advisories": result.advisories,
                                      "matches": found, "quiet": result.quiet, "caveats": caveats}, indent=2) + "\n")
@@ -249,7 +256,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
         with open(summary_file, "a") as handle:  # counts only: safe to show in any repo
             handle.write(f"### blastcheck daily sweep\n\n{line}\n")
             for caveat in caveats:
-                if caveat == report.PUBLIC_ONLY_WARNING:
+                if caveat == visibility:
                     handle.write(f"\n> **Warning: {caveat}**\n")
     return 1 if found else 0
 
@@ -269,8 +276,8 @@ def cmd_check(args: argparse.Namespace) -> int:
     if args.json:
         sys.stdout.write(json.dumps({**summary, "issue_url": issue_url}, indent=2) + "\n")
     else:
-        if summary["only_public_repos_visible"]:
-            sys.stdout.write(f"\nWARNING: {report.PUBLIC_ONLY_WARNING}\n")
+        if summary["visibility_warning"]:
+            sys.stdout.write(f"\nWARNING: {summary['visibility_warning']}\n")
         sys.stdout.write(f"\n{report.HEADLINES[worst]}\n{incident.confirmation.status}: "
                          f"{'; '.join(incident.confirmation.evidence)}\n\n{summary['reply']}\n\n"
                          f"Full report: {out / (incident.slug + '.md')}\n")

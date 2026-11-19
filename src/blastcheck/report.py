@@ -120,19 +120,28 @@ def _checklist(incident: Incident, results: tuple[RepoResult, ...], skipped: tup
     return steps
 
 
-def only_public_visible(inventories: dict[str, RepoInventory]) -> bool:
-    """True when every repo the token could see is public.
+def visible_counts(inventories: dict[str, RepoInventory]) -> tuple[int, int]:
+    """(private, public) repos the token could see, among those whose visibility is known."""
+    private = sum(1 for inv in inventories.values() if inv.visibility == "private")
+    public = sum(1 for inv in inventories.values() if inv.visibility == "public")
+    return private, public
+
+
+def visibility_warning(inventories: dict[str, RepoInventory]) -> str:
+    """A warning when almost nothing private is visible, else an empty string.
 
     A token cannot list what it has no access to, so missing private repos are invisible, not
-    errors. An org with private repos and a token that sees none of them is the commonest way
-    to get a confident answer about a tenth of the code.
+    errors. An org with many private repos and a token that sees one or none of them is the
+    commonest way to get a confident answer about a tenth of the code.
     """
-    seen = [inv.visibility for inv in inventories.values() if inv.visibility]
-    return bool(seen) and all(value == "public" for value in seen)
-
-
-PUBLIC_ONLY_WARNING = ("Only public repos were visible to the token. If the org has private repos, they were NOT "
-                       "checked: give the token read access to all repositories and run again.")
+    private, public = visible_counts(inventories)
+    total = private + public
+    if total == 0 or private * 5 >= total:
+        return ""
+    seen = "No private repos were" if private == 0 else f"Only {private} of the {total} repos"
+    tail = "visible to the token" if private == 0 else "visible to the token are private"
+    return (f"{seen} {tail}. If the org has more private repos, they were NOT checked: give the token read access "
+            "to all repositories and run again.")
 
 
 def _coverage(results: tuple[RepoResult, ...], skipped: tuple[str, ...], public_only: bool = False) -> tuple[str, str]:
@@ -140,7 +149,7 @@ def _coverage(results: tuple[RepoResult, ...], skipped: tuple[str, ...], public_
     unread = len(_by_verdict(results, INCOMPLETE))
     caveats = []
     if public_only:
-        caveats.append("only public repos were visible to the access token, so any private repos have not been "
+        caveats.append("our access token can see almost none of the private repos, so those have not been "
                        "checked yet")
     if unread:
         caveats.append(f"{unread} {'repo' if unread == 1 else 'repos'} could not be fully read, so this is not yet "
@@ -166,7 +175,7 @@ def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[st
     opening, caveat = _coverage(results, skipped, public_only)
     if public_only and worst in (SAFE_VERSION, NOT_USED):
         bad, name = incident.versions_text, incident.package
-        return (f"We checked the {len(results)} public repos and found no use of the affected versions of {name} "
+        return (f"We checked the {len(results)} repos our scanner can see and found no use of the affected versions of {name} "
                 f"({bad}) there. This is not yet an answer for the organisation:{caveat.rstrip('.').lstrip()}.")
     affected = [r.repo for r in _by_verdict(results, AFFECTED)]
     at_risk = [r.repo for r in _by_verdict(results, AT_RISK)]
@@ -199,12 +208,14 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
     worst = headline(results)
     counts = Counter(r.verdict for r in results)
     checked, differing, branch_notes = branch_coverage(inventories)
-    public_only = only_public_visible(inventories)
+    warning = visibility_warning(inventories)
+    public_only = bool(warning)
+    private_seen, public_seen = visible_counts(inventories)
     lines = [
         marker(incident),
         f"## {HEADLINES[worst]}",
         "",
-        *([f"> **Warning: {PUBLIC_ONLY_WARNING}**", ""] if public_only else []),
+        *([f"> **Warning: {warning}**", ""] if warning else []),
         f"**Incident:** {plain(incident.display_title)}",
         f"**Package:** {code(incident.package)} ({incident.ecosystem}) — bad versions: "
         + ("all versions" if incident.all_versions else ", ".join(code(v) for v in incident.bad_versions[:40]))
@@ -216,7 +227,8 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
     lines += [
         _confirmation_line(incident),
         "",
-        f"Checked **{len(results)}** repos in {code(owner)} on {now:%Y-%m-%d %H:%M} UTC."
+        f"Checked **{len(results)}** repos in {code(owner)} on {now:%Y-%m-%d %H:%M} UTC"
+        + (f" ({private_seen} private and {public_seen} public were visible to the token)." if private_seen + public_seen else ".")
         + (f" **{len(skipped)}** archived repos were skipped." if skipped else "")
         + (f" Besides each default branch, **{checked}** other branches were checked (deploy-named or recently "
            f"pushed); {differing} of them differ in their dependency files." if checked else ""),
@@ -268,7 +280,9 @@ def summary(incident: Incident, results: tuple[RepoResult, ...], owner: str, ski
             inventories: dict[str, RepoInventory] | None = None) -> dict:
     counts = Counter(r.verdict for r in results)
     checked, differing, branch_notes = branch_coverage(inventories or {})
-    public_only = only_public_visible(inventories or {})
+    warning = visibility_warning(inventories or {})
+    public_only = bool(warning)
+    private_seen, public_seen = visible_counts(inventories or {})
     return {
         "owner": owner,
         "package": incident.package,
@@ -278,7 +292,9 @@ def summary(incident: Incident, results: tuple[RepoResult, ...], owner: str, ski
         "headline": headline(results),
         "repos_checked": len(results),
         "archived_skipped": list(skipped),
-        "only_public_repos_visible": public_only,
+        "visible_private_repos": private_seen,
+        "visible_public_repos": public_seen,
+        "visibility_warning": warning,
         "other_branches_checked": checked,
         "other_branches_differing": differing,
         "branch_notes": branch_notes,

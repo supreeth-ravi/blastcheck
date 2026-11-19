@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.2 — 2026-11-19
+
+- The visibility warning now also fires when only a small share of the visible repos is private,
+  and every report states how many private and public repos the token could see.
+- New `--expect-repos` (action input `expect-repos`): stop with an error if fewer repos are
+  visible than expected.
+
 ## 0.1.1 — 2026-11-19
 
 - Warns, in the report, the reply and `setup`, when the token can only see public repos. A token
