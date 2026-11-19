@@ -1,0 +1,112 @@
+name: Incident check
+
+# Answers "are we affected?" for every repo in this org. Runs entirely on your own runner
+# with your own secrets. Start it from the Actions tab.
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "Article or advisory link (needs the ANTHROPIC_API_KEY secret). Leave empty if you fill in the package fields."
+        required: false
+      package:
+        description: "Package name, e.g. agent-framework"
+        required: false
+      ecosystem:
+        description: "Where the package is published"
+        type: choice
+        default: PyPI
+        options: [PyPI, npm, Go, crates.io, Maven]
+      bad_versions:
+        description: "Bad versions, comma-separated, e.g. 1.26.1,1.26.2"
+        required: false
+      last_clean:
+        description: "Last known clean version (optional)"
+        required: false
+      org:
+        description: "Org to check (default: the owner of this repo)"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: blastcheck
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore the inventory from the last run
+        uses: actions/cache/restore@v4
+        with:
+          path: .blastcheck/inventory.json
+          key: blastcheck-inventory-${{ inputs.org || github.repository_owner }}-${{ github.run_id }}
+          restore-keys: blastcheck-inventory-${{ inputs.org || github.repository_owner }}-
+
+      - name: Install
+        env:
+          IN_URL: ${{ inputs.url }}
+        run: |
+          if [ -n "$IN_URL" ]; then pip install --quiet ".[ai]"; else pip install --quiet .; fi
+
+      - name: Check every repo
+        # Secrets are given to this step only, never to checkout, setup or install.
+        # Inputs are passed through the environment, never pasted into the shell command.
+        env:
+          IN_URL: ${{ inputs.url }}
+          IN_PACKAGE: ${{ inputs.package }}
+          IN_ECOSYSTEM: ${{ inputs.ecosystem }}
+          IN_BAD: ${{ inputs.bad_versions }}
+          IN_LAST_CLEAN: ${{ inputs.last_clean }}
+          IN_ORG: ${{ inputs.org || github.repository_owner }}
+          BLASTCHECK_ORG_TOKEN: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
+          BLASTCHECK_ISSUE_TOKEN: ${{ github.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BLASTCHECK_SLACK_WEBHOOK: ${{ secrets.BLASTCHECK_SLACK_WEBHOOK }}
+          BLASTCHECK_SMTP_HOST: ${{ secrets.BLASTCHECK_SMTP_HOST }}
+          BLASTCHECK_SMTP_PORT: ${{ secrets.BLASTCHECK_SMTP_PORT }}
+          BLASTCHECK_SMTP_USER: ${{ secrets.BLASTCHECK_SMTP_USER }}
+          BLASTCHECK_SMTP_PASSWORD: ${{ secrets.BLASTCHECK_SMTP_PASSWORD }}
+          BLASTCHECK_MAIL_FROM: ${{ secrets.BLASTCHECK_MAIL_FROM }}
+          BLASTCHECK_MAIL_TO: ${{ secrets.BLASTCHECK_MAIL_TO }}
+        run: |
+          if [ -z "$BLASTCHECK_ORG_TOKEN" ]; then
+            echo "::error::Add the BLASTCHECK_ORG_TOKEN secret: a token with read access to the org's repos."
+            exit 3
+          fi
+          args=(check --org "$IN_ORG" --issue-repo "$GITHUB_REPOSITORY" --notify)
+          if [ -n "$IN_URL" ]; then
+            args+=(--url "$IN_URL")
+          else
+            args+=(--package "$IN_PACKAGE" --ecosystem "$IN_ECOSYSTEM" --bad "$IN_BAD")
+            if [ -n "$IN_LAST_CLEAN" ]; then args+=(--last-clean "$IN_LAST_CLEAN"); fi
+          fi
+          blastcheck "${args[@]}"
+
+      - name: Save the inventory for the next run
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .blastcheck/inventory.json
+          key: blastcheck-inventory-${{ inputs.org || github.repository_owner }}-${{ github.run_id }}
+
+      - name: Keep the report files
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blastcheck-report
+          path: .blastcheck/reports/
+          if-no-files-found: ignore
+          retention-days: 30

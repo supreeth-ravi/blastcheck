@@ -1,0 +1,229 @@
+"""Turn results into the incident issue, a forwardable reply, and a JSON summary.
+
+Everything that originates in a scanned repo (file paths, version specifiers, parse errors)
+or in an article (title, indicators) is untrusted and is escaped before it reaches markdown.
+"""
+from __future__ import annotations
+
+import re
+from collections import Counter
+from collections.abc import Iterable
+from datetime import datetime, timezone
+
+from .matcher import headline
+from .models import AFFECTED, AT_RISK, INCOMPLETE, NOT_USED, SAFE_VERSION, Incident, RepoInventory, RepoResult
+
+HEADLINES = {
+    AFFECTED: "AFFECTED — a known-bad version is pinned",
+    AT_RISK: "AT RISK — a loose version range could have pulled a bad version",
+    INCOMPLETE: "INCOMPLETE — nothing bad found, but some repos could not be fully read",
+    SAFE_VERSION: "NO BAD VERSION PINNED — the package is used, at safe versions only",
+    NOT_USED: "NOT AFFECTED — the package is not used in any repo",
+}
+MAX_ROWS = 60
+_CONTROL = re.compile(r"[\x00-\x1f\x7f  ]+")
+_MARKDOWN = re.compile(r"([\\`*_{}\[\]()<>#|!~])")
+
+
+def code(text: object, limit: int = 120, table: bool = False) -> str:
+    """Untrusted text as an inline code span that cannot be closed from inside."""
+    clean = _CONTROL.sub(" ", str(text)).strip()[:limit].replace("`", "'")
+    if table:
+        clean = clean.replace("|", "\\|")
+    return f"`{clean}`" if clean else "(empty)"
+
+
+def plain(text: object, limit: int = 300) -> str:
+    """Untrusted text as inert prose: no links, images, HTML, tables or @mentions."""
+    clean = _CONTROL.sub(" ", str(text)).strip()[:limit]
+    clean = clean.replace("&", "&amp;")
+    return _MARKDOWN.sub(r"\\\1", clean).replace("@", "@​")
+
+
+def marker(incident: Incident) -> str:
+    return f"<!-- blastcheck:{incident.slug} -->"
+
+
+def title(incident: Incident, results: Iterable[RepoResult]) -> str:
+    label = HEADLINES[headline(results)].split(" — ")[0]
+    return f"[blastcheck] {incident.package} {', '.join(incident.bad_versions)}: {label}"[:250]
+
+
+def _by_verdict(results: Iterable[RepoResult], verdict: str) -> list[RepoResult]:
+    return [r for r in results if r.verdict == verdict]
+
+
+def _evidence_rows(results: list[RepoResult]) -> list[str]:
+    rows = ["| Repo | File | Declared as |", "|---|---|---|"]
+    total = sum(len(r.evidence) for r in results)
+    count = 0
+    for result in results:
+        for dep in result.evidence:
+            if count >= MAX_ROWS:
+                rows.append(f"| … | {total - count} more rows not shown | |")
+                return rows
+            joiner = "@" if dep.ecosystem == "npm" else (" " if dep.ecosystem in ("Go", "crates.io", "Maven") else "")
+            declared = f"{dep.name}{joiner}{dep.spec}" if dep.spec else f"{dep.name} (no version)"
+            rows.append(f"| {code(result.repo, table=True)} | {code(dep.file, table=True)} | {code(declared, table=True)} |")
+            count += 1
+    return rows
+
+
+def _confirmation_line(incident: Incident) -> str:
+    conf = incident.confirmation
+    evidence = "; ".join(plain(item) for item in conf.evidence)
+    if conf.status == "confirmed":
+        return "**Confirmed** by an outside source: " + evidence
+    origin = {"article": "an article", "manual": "manual entry", "file": "an incident file"}.get(incident.origin, "manual entry")
+    return (f"**Unconfirmed.** This incident comes from {origin} and no outside source has confirmed it yet. "
+            + evidence)
+
+
+def _checklist(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[str, ...]) -> list[str]:
+    worst = headline(results)
+    package = code(incident.package)
+    bad = ", ".join(incident.bad_versions)
+    steps: list[str] = []
+    if _by_verdict(results, INCOMPLETE):
+        steps.append("- [ ] Check the repos listed under \"Could not fully check\" by hand, or fix access and re-run")
+    if worst in (AFFECTED, AT_RISK) and incident.kind == "malware":
+        steps += [
+            "- [ ] Do not run the affected environments; rebuild them from a clean base instead of cleaning in place",
+            "- [ ] Find where the listed repos were installed or built since the bad release (CI runs, images, laptops)",
+            "- [ ] Rotate every credential those environments could read, from a clean machine"
+            + (f": {', '.join(plain(c, 80) for c in incident.credentials_at_risk)}" if incident.credentials_at_risk else ""),
+            "- [ ] Review audit logs for use of those credentials after the install time",
+        ]
+        if incident.indicators:
+            steps.append("- [ ] Look for these signs of compromise (as reported by the source, not verified here): "
+                         + ", ".join(code(i) for i in incident.indicators))
+    if worst in (AFFECTED, AT_RISK):
+        target = code(incident.last_clean) if incident.last_clean else "a known-clean version"
+        steps.append(f"- [ ] Pin {package} to {target} in the listed files and regenerate lock files")
+    if incident.kind == "malware" and _by_verdict(results, SAFE_VERSION):
+        steps.append("- [ ] For repos using the package at a safe version: a lock file that is safe today does not prove "
+                     "a bad version was never installed. Check their CI and lock file history"
+                     + (f" for the exposure window ({plain(incident.window)})" if incident.window else ""))
+    steps += [
+        f"- [ ] Block {package} {bad} in any package proxy or allow-list",
+        f"- [ ] Ask the team whether anyone installed {package} by hand"
+        + (f" during the exposure window ({plain(incident.window)})" if incident.window else "")
+        + "; this scan cannot see laptops or servers",
+    ]
+    if skipped:
+        steps.append(f"- [ ] {len(skipped)} archived repos were not checked; re-run with `--include-archived` if any are still deployed")
+    return steps
+
+
+def _coverage(results: tuple[RepoResult, ...], skipped: tuple[str, ...]) -> tuple[str, str]:
+    """(opening words, caveat sentence). Says "all" only when nothing was left unread or skipped."""
+    unread = len(_by_verdict(results, INCOMPLETE))
+    caveats = []
+    if unread:
+        caveats.append(f"{unread} {'repo' if unread == 1 else 'repos'} could not be fully read, so this is not yet "
+                       f"a complete answer; we are checking those by hand")
+    if skipped:
+        caveats.append(f"{len(skipped)} archived {'repo was' if len(skipped) == 1 else 'repos were'} not checked")
+    opening = f"We checked all {len(results)} repos" if not caveats else f"We checked {len(results)} repos"
+    return opening, (" " + ". ".join(caveats) + ".") if caveats else ""
+
+
+def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[str, ...] = ()) -> str:
+    """A short plain-text answer suitable for forwarding. Never overstates what was checked."""
+    worst = headline(results)
+    opening, caveat = _coverage(results, skipped)
+    affected = [r.repo for r in _by_verdict(results, AFFECTED)]
+    at_risk = [r.repo for r in _by_verdict(results, AT_RISK)]
+    bad = " and ".join(incident.bad_versions)
+    name = incident.package
+    if worst == AFFECTED:
+        body = (f"{opening}. {len(affected)} pin an affected version of {name} ({bad}): {', '.join(affected)}. "
+                f"We are treating this as an incident: rebuilding those environments and rotating the credentials "
+                f"they could reach.")
+        if at_risk:
+            body += f" A further {len(at_risk)} use a loose version range that could have pulled one: {', '.join(at_risk)}."
+    elif worst == AT_RISK:
+        body = (f"{opening}. None pin an affected version of {name} ({bad}), but {len(at_risk)} use it with a loose "
+                f"version range that could have pulled one: {', '.join(at_risk)}. We are checking when those were "
+                f"last installed and pinning them to a safe version.")
+    elif worst == INCOMPLETE:
+        body = f"{opening} and found no use of the affected versions of {name} ({bad}) in the ones we could read."
+    else:
+        body = (f"{opening}. None of them currently use the affected versions of {name} ({bad}) on their default "
+                f"branches, so no remediation is needed in our code.")
+    return body + caveat + " As a precaution we are confirming nobody installed it manually, and blocking those versions."
+
+
+def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories: dict[str, RepoInventory],
+               owner: str, now: datetime | None = None, skipped: tuple[str, ...] = ()) -> str:
+    now = now or datetime.now(timezone.utc)
+    worst = headline(results)
+    counts = Counter(r.verdict for r in results)
+    lines = [
+        marker(incident),
+        f"## {HEADLINES[worst]}",
+        "",
+        f"**Incident:** {plain(incident.display_title)}",
+        f"**Package:** {code(incident.package)} ({incident.ecosystem}) — bad versions: "
+        + ", ".join(code(v) for v in incident.bad_versions)
+        + (f" — last clean: {code(incident.last_clean)}" if incident.last_clean else ""),
+    ]
+    if incident.window:
+        lines.append(f"**Exposure window:** {plain(incident.window)}")
+    lines += [
+        _confirmation_line(incident),
+        "",
+        f"Checked **{len(results)}** repos in {code(owner)} on {now:%Y-%m-%d %H:%M} UTC."
+        + (f" **{len(skipped)}** archived repos were skipped." if skipped else ""),
+        "",
+        "| Verdict | Repos |",
+        "|---|---:|",
+        f"| Affected | {counts[AFFECTED]} |",
+        f"| At risk | {counts[AT_RISK]} |",
+        f"| Uses the package at a safe version | {counts[SAFE_VERSION]} |",
+        f"| Does not use the package | {counts[NOT_USED]} |",
+        f"| Could not fully check | {counts[INCOMPLETE]} |",
+        "",
+    ]
+    for verdict, heading in ((AFFECTED, "Affected"), (AT_RISK, "At risk"),
+                             (SAFE_VERSION, "Uses the package at a safe version")):
+        group = _by_verdict(results, verdict)
+        if group:
+            lines += [f"### {heading}", "", *_evidence_rows(group), ""]
+    unread = _by_verdict(results, INCOMPLETE)
+    if unread:
+        lines += ["### Could not fully check", ""]
+        lines += [f"- {code(r.repo)}: {plain(r.reason)}" for r in unread[:MAX_ROWS]]
+        if len(unread) > MAX_ROWS:
+            lines.append(f"- … and {len(unread) - MAX_ROWS} more")
+        lines.append("")
+    lines += ["### What to do", "", *_checklist(incident, results, skipped), "", "### Ready-to-send reply", "",
+              "> " + plain(reply(incident, results, skipped), 2000), ""]
+    if incident.sources:
+        lines += ["### Sources", "", *[f"- <{source}>" for source in incident.sources], ""]
+    pushed = [inv.pushed_at for inv in inventories.values() if inv.pushed_at]
+    lines += [
+        "---",
+        "Scope: dependency and lock files on each repo's default branch, as they are now. Not covered: other "
+        "branches, past states of a lock file, Dockerfiles, CI workflow files, Gradle and Bun files, "
+        "and what is installed on laptops or servers."
+        + (f" Most recent push seen: {max(pushed)[:10]}." if pushed else ""),
+    ]
+    return "\n".join(lines)
+
+
+def summary(incident: Incident, results: tuple[RepoResult, ...], owner: str, skipped: tuple[str, ...] = ()) -> dict:
+    counts = Counter(r.verdict for r in results)
+    return {
+        "owner": owner,
+        "package": incident.package,
+        "ecosystem": incident.ecosystem,
+        "bad_versions": list(incident.bad_versions),
+        "confirmation": incident.confirmation.status,
+        "headline": headline(results),
+        "repos_checked": len(results),
+        "archived_skipped": list(skipped),
+        "counts": dict(counts),
+        "repos": {v: [r.repo for r in _by_verdict(results, v)] for v in (AFFECTED, AT_RISK, SAFE_VERSION, INCOMPLETE)},
+        "reply": reply(incident, results, skipped),
+    }
