@@ -17,6 +17,11 @@ on:
         type: choice
         default: PyPI
         options: [PyPI, npm, Go, crates.io, Maven]
+      kind:
+        description: "malware = a malicious release; vulnerability = a release with a known security flaw"
+        type: choice
+        default: malware
+        options: [malware, vulnerability]
       bad_versions:
         description: "Bad versions, comma-separated, e.g. 1.26.1,1.26.2"
         required: false
@@ -80,6 +85,7 @@ jobs:
           IN_PACKAGE: ${{ inputs.package }}
           IN_ECOSYSTEM: ${{ inputs.ecosystem }}
           IN_BAD: ${{ inputs.bad_versions }}
+          IN_KIND: ${{ inputs.kind }}
           IN_LAST_CLEAN: ${{ inputs.last_clean }}
           IN_ORG: ${{ inputs.org || github.repository_owner }}
           IN_ALLOW_PUBLIC: ${{ inputs.allow_public }}
@@ -103,7 +109,7 @@ jobs:
           if [ -n "$IN_URL" ]; then
             args+=(--url "$IN_URL")
           else
-            args+=(--package "$IN_PACKAGE" --ecosystem "$IN_ECOSYSTEM" --bad "$IN_BAD")
+            args+=(--package "$IN_PACKAGE" --ecosystem "$IN_ECOSYSTEM" --bad "$IN_BAD" --kind "$IN_KIND")
             if [ -n "$IN_LAST_CLEAN" ]; then args+=(--last-clean "$IN_LAST_CLEAN"); fi
           fi
           blastcheck "${args[@]}"

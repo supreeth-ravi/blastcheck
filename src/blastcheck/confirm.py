@@ -15,13 +15,26 @@ OSV_QUERY = "https://api.osv.dev/v1/query"
 Fetch = Callable[..., http.Response]
 
 
-def _osv_evidence(incident: Incident, version: str, fetch: Fetch) -> list[str]:
+def _osv_evidence(incident: Incident, version: str, fetch: Fetch) -> tuple[list[str], list[str]]:
+    """Returns (confirming evidence, notes that do not confirm)."""
     payload = {"package": {"name": incident.package, "ecosystem": incident.ecosystem}, "version": version}
     data = fetch("POST", OSV_QUERY, payload=payload).json()
     vulns = data.get("vulns", []) if isinstance(data, dict) else []
-    wanted = "MAL-" if incident.kind == "malware" else ""
-    ids = [v["id"] for v in vulns if v.get("id", "").startswith(wanted)]
-    return [f"OSV lists {vuln_id} for {incident.package} {version}" for vuln_id in ids[:3]]
+    ids = [v["id"] for v in vulns if v.get("id")]
+    malware = [i for i in ids if i.startswith("MAL-")]
+    label = f"{incident.package} {version}"
+    if incident.kind == "malware":
+        if malware:
+            return [f"OSV lists {vuln_id} for {label}" for vuln_id in malware[:3]], []
+        if ids:
+            return [], [f"OSV has no malware report for {label}; it lists {len(ids)} ordinary vulnerability "
+                        f"advisories (for example {ids[0]}), so this may be a vulnerable version rather than a "
+                        f"malicious one"]
+        return [], []
+    if ids:
+        more = f" and {len(ids) - 3} more" if len(ids) > 3 else ""
+        return [f"OSV lists {', '.join(ids[:3])}{more} for {label}"], []
+    return [], []
 
 
 def _pypi_evidence(incident: Incident, version: str, fetch: Fetch) -> tuple[list[str], list[str]]:
@@ -46,7 +59,9 @@ def confirm(incident: Incident, fetch: Fetch = http.request) -> Confirmation:
     notes: list[str] = []
     for version in incident.bad_versions:
         try:
-            evidence.extend(_osv_evidence(incident, version, fetch))
+            found, extra = _osv_evidence(incident, version, fetch)
+            evidence.extend(found)
+            notes.extend(extra)
         except (http.HttpError, ValueError) as exc:
             notes.append(f"OSV could not be reached for {version} ({exc})")
         if incident.ecosystem == "PyPI":

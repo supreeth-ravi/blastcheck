@@ -76,6 +76,16 @@ def test_confirmed_by_osv_malware_advisory():
     assert got.status == "confirmed" and "MAL-2026-9" in got.evidence[0] and len(got.evidence) == 1
 
 
+def test_vulnerable_but_not_malicious_is_explained_not_confirmed_as_malware():
+    got = confirm.confirm(INCIDENT, fetcher({"vulns": [{"id": "GHSA-a"}, {"id": "GHSA-b"}]}, {"urls": [{}]}))
+    assert got.status == "unconfirmed" and "no malware report" in got.evidence[0] and "GHSA-a" in got.evidence[0]
+    from dataclasses import replace
+    vuln = replace(INCIDENT, kind="vulnerability")
+    ok = confirm.confirm(vuln, fetcher({"vulns": [{"id": f"GHSA-{i}"} for i in range(5)]}, {"urls": [{}]}))
+    assert ok.status == "confirmed" and "and 2 more" in ok.evidence[0]
+    assert confirm.confirm(vuln, fetcher({}, {"urls": [{}]})).status == "unconfirmed"
+
+
 def test_confirmed_by_pypi_yank():
     got = confirm.confirm(INCIDENT, fetcher({}, {"urls": [{"yanked": True, "yanked_reason": "malicious"}]}))
     assert got.status == "confirmed" and "yanked: malicious" in got.evidence[0]
