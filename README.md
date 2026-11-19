@@ -111,7 +111,7 @@ One read-only token. Only dependency and lock files are downloaded; source code 
 <td valign="top">
 
 **🧩 Three ways to run it**<br>
-A command-line tool, a GitHub Action installed from this template, and a Claude Code skill. One core, the same answer from each.
+A command-line tool, a GitHub Action you call from a private repo of your own, and a Claude Code skill. One core, the same answer from each.
 
 </td>
 <td valign="top">
@@ -221,16 +221,31 @@ The first run reads every repo (about a minute for 150 repos). Later runs reuse 
 
 ### As a GitHub Action in your org
 
-1. Click **Use this template** and create a **private** repo in your org, for example `security-scan`.
-2. Create a fine-grained token: resource owner your org, all repositories, read-only **Contents** (Metadata is added automatically).
-3. Add it to the new repo as a secret named `BLASTCHECK_ORG_TOKEN` (Settings → Secrets and variables → Actions).
-4. Open **Actions → Incident check → Run workflow**, enter the package and bad versions, and run.
+The code lives here; your results never do. You call blastcheck from a **private repo of your own**, and every issue, log, cache and report stays in that repo.
 
-The result is an issue in that repo, labelled `blastcheck`. The **Daily watch** workflow needs nothing more: it starts running every day at 02:30 UTC.
+1. Pick or create a **private** repo in your org to hold the results, for example `security-scan`.
+2. Create a fine-grained token: resource owner your org, all repositories, read-only **Contents** (Metadata is added automatically).
+3. Add it to that repo as a secret named `BLASTCHECK_ORG_TOKEN` (Settings → Secrets and variables → Actions).
+4. Copy [`examples/incident-check.yml`](examples/incident-check.yml) and [`examples/daily-watch.yml`](examples/daily-watch.yml) into its `.github/workflows/` folder. Each is about 40 lines and calls this action:
+
+   ```yaml
+   - uses: phronetic-ai/blastcheck@v0.1.0
+     with:
+       mode: check            # or: watch
+       org-token: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
+       package: ${{ inputs.package }}
+       bad-versions: ${{ inputs.bad_versions }}
+   ```
+
+5. Open **Actions → Incident check → Run workflow**, enter the package and bad versions, and run.
+
+The result is an issue in your repo, labelled `blastcheck`. The daily watch starts running by itself at 02:30 UTC.
+
+If the repo you run it from is public, blastcheck stops before reading anything, because its logs, cache and issues would expose your private repo names.
 
 | Optional secret | What it enables |
 |---|---|
-| `ANTHROPIC_API_KEY` | Paste an article link instead of the package and versions |
+| `ANTHROPIC_API_KEY` | Paste an article link instead of the package and versions (pass it as `anthropic-api-key`) |
 | `BLASTCHECK_SLACK_WEBHOOK` | A short notice in Slack |
 | `BLASTCHECK_SMTP_HOST`, `_PORT`, `_USER`, `_PASSWORD`, `BLASTCHECK_MAIL_FROM`, `BLASTCHECK_MAIL_TO` | A short notice by email |
 
@@ -309,6 +324,7 @@ When in doubt it flags. Pre-release versions, dist-tags such as `next`, and spec
   | OSV and the package registry | Public package names and versions |
   | Claude API (only with `--url`) | The text of the public article |
 
+- **This repo never receives your data.** blastcheck's own repo holds only code. Your issues, logs, caches and reports live in the private repo you run it from.
 - **It writes in one place:** issues in the scan repo you chose. It refuses to write there, or to a run summary, if that repo is public, because the report names private repos and files.
 - **No analytics or tracking.** There is no blastcheck server.
 

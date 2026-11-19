@@ -194,3 +194,22 @@ def test_unknown_visibility_is_treated_as_public(wired_cli, monkeypatch, capsys)
     cli.main(["check", *base, "--package", "agent-framework", "--ecosystem", "pypi", "--bad", "1.26.2",
               "--no-confirm", "--out", str(tmp / "out"), "--issue-repo", "acme-labs/scan"])
     assert gh.issues == [] and not summary.exists() and "could not check whether" in capsys.readouterr().err
+
+
+def test_in_ci_a_public_or_unverifiable_repo_stops_everything_before_any_read(wired_cli, monkeypatch, capsys):
+    gh, base, tmp = wired_cli
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    args = ["check", *base, "--package", "agent-framework", "--ecosystem", "pypi", "--bad", "1.26.2", "--no-confirm",
+            "--out", str(tmp / "out")]
+    assert cli.main([*args, "--issue-repo", "acme-labs/scan-public"]) == 3
+    assert gh.tree_reads == 0 and gh.issues == [] and not (tmp / "inv.json").exists()   # no scan, no cache
+    assert "is public" in capsys.readouterr().err
+    assert cli.main(["watch", *base, "--issue-repo", "acme-labs/scan-public"]) == 3 and gh.tree_reads == 0
+
+    def boom(repo):
+        raise GitHubError(404, "not found")
+    private_check, gh.is_private = gh.is_private, boom
+    assert cli.main([*args, "--issue-repo", "acme-labs/scan"]) == 3 and gh.tree_reads == 0
+    gh.is_private = private_check
+    assert cli.main([*args, "--issue-repo", "acme-labs/scan"]) == 1 and len(gh.issues) == 1     # private: runs
+    assert cli.main([*args, "--issue-repo", "acme-labs/scan-public", "--allow-public-issue-repo"]) == 1

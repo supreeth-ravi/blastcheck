@@ -133,6 +133,34 @@ def write_issue(args: argparse.Namespace, marker: str, title: str, body: str, re
         return "", True
 
 
+class PublicRepoError(Exception):
+    """Running in CI with a public (or unverifiable) target repo: stop before anything is logged."""
+
+
+def preflight(args: argparse.Namespace) -> None:
+    """In CI, logs, caches and artifacts are as visible as the repo the job runs in.
+
+    So when running under GitHub Actions the target repo's visibility is checked before any
+    work is done, not just before the issue is written. On a laptop the output only goes to the
+    person running it, and the softer gate in write_issue() is enough.
+    """
+    if os.environ.get("GITHUB_ACTIONS") != "true" or not getattr(args, "issue_repo", None):
+        return
+    if args.allow_public_issue_repo:
+        return
+    if not _REPO.match(args.issue_repo):
+        raise PublicRepoError(f"--issue-repo must look like owner/name, not {args.issue_repo!r}")
+    writer = GitHub(resolve_token(names=("BLASTCHECK_ISSUE_TOKEN", "GITHUB_TOKEN", "GH_TOKEN")))
+    try:
+        private = writer.is_private(args.issue_repo)
+    except GitHubError as exc:
+        raise PublicRepoError(f"could not confirm that {args.issue_repo} is private ({exc}); nothing was run") from exc
+    if not private:
+        raise PublicRepoError(
+            f"{args.issue_repo} is public. The report, logs and cache would expose private repo names, so nothing "
+            "was run. Run blastcheck from a private repo, or set allow-public if you really mean to.")
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     inventories, skipped = get_inventory(args, GitHub(resolve_token()))
     with_files = [i for i in inventories.values() if i.files_read]
@@ -180,6 +208,7 @@ def publish(args: argparse.Namespace, incident: Incident, results: tuple, invent
 
 
 def cmd_watch(args: argparse.Namespace) -> int:
+    preflight(args)
     inventories, skipped = get_inventory(args, GitHub(resolve_token()))
     result = watch.sweep(inventories.values(), args.recent_days)
     unread = sorted(inv.repo for inv in inventories.values() if inv.errors or any(b.errors for b in inv.branches))
@@ -217,6 +246,7 @@ def cmd_watch(args: argparse.Namespace) -> int:
 
 
 def cmd_check(args: argparse.Namespace) -> int:
+    preflight(args)
     incident = load_incident(args)
     if not args.no_confirm:
         incident = incident_mod.with_confirmation(incident, confirm.confirm(incident))
@@ -244,6 +274,8 @@ def main(argv: list[str] | None = None) -> int:
         say(f"incident problem: {exc}")
     except watch.WatchError as exc:
         say(f"sweep problem: {exc}")
+    except PublicRepoError as exc:
+        say(f"::error::{exc}" if os.environ.get("GITHUB_ACTIONS") == "true" else str(exc))
     except GitHubError as exc:
         say(f"GitHub problem: {exc}")
     except Exception as exc:  # last-resort boundary: show a clear message, exit non-zero

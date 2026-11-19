@@ -1,0 +1,28 @@
+# Copy this file to .github/workflows/daily-watch.yml in a PRIVATE repo of your own.
+# Every day it asks the public malware database (OSV) about each package your repos use and
+# opens an issue only when a known-malicious release matches. Otherwise it stays silent.
+name: Daily watch
+
+on:
+  schedule:
+    - cron: "30 2 * * *"   # 02:30 UTC daily; change to suit your timezone
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: blastcheck
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: phronetic-ai/blastcheck@v0.1.0   # for a stricter setup, pin to a commit SHA
+        with:
+          mode: watch
+          org-token: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
+          slack-webhook: ${{ secrets.BLASTCHECK_SLACK_WEBHOOK }}

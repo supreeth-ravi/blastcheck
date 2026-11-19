@@ -1,0 +1,167 @@
+name: blastcheck
+description: Know which of your org's repos use a compromised package. Runs in your own private repo with your own token.
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  mode:
+    description: "check = one named incident; watch = sweep every package the org uses against known-malicious releases"
+    required: true
+  org-token:
+    description: "Token with read-only Contents access to the org's repos"
+    required: true
+  org:
+    description: "Org to check (default: the owner of the repo this runs in)"
+    required: false
+    default: ""
+  issue-token:
+    description: "Token used to write the issue in the repo this runs in"
+    required: false
+    default: ${{ github.token }}
+  package:
+    description: "check: package name"
+    required: false
+    default: ""
+  ecosystem:
+    description: "check: PyPI, npm, Go, crates.io or Maven"
+    required: false
+    default: PyPI
+  bad-versions:
+    description: "check: bad versions, comma-separated"
+    required: false
+    default: ""
+  kind:
+    description: "check: malware or vulnerability"
+    required: false
+    default: malware
+  last-clean:
+    description: "check: last known clean version"
+    required: false
+    default: ""
+  url:
+    description: "check: article link to read with Claude instead of package/versions (needs anthropic-api-key)"
+    required: false
+    default: ""
+  recent-days:
+    description: "watch: report loose version ranges only for advisories this recent"
+    required: false
+    default: "7"
+  allow-public:
+    description: "'true' to run even though the calling repo is public (issues, logs and artifacts will expose private repo names)"
+    required: false
+    default: "false"
+  anthropic-api-key:
+    required: false
+    default: ""
+  slack-webhook:
+    required: false
+    default: ""
+  smtp-host:
+    required: false
+    default: ""
+  smtp-port:
+    required: false
+    default: ""
+  smtp-user:
+    required: false
+    default: ""
+  smtp-password:
+    required: false
+    default: ""
+  mail-from:
+    required: false
+    default: ""
+  mail-to:
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install blastcheck
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        IN_URL: ${{ inputs.url }}
+      run: |
+        if [ -n "$IN_URL" ]; then pip install --quiet "${ACTION_PATH}[ai]"; else pip install --quiet "$ACTION_PATH"; fi
+
+    - name: Restore the inventory from the last run
+      uses: actions/cache/restore@v4
+      with:
+        path: .blastcheck/inventory.json
+        key: blastcheck-inventory-${{ inputs.org || github.repository_owner }}-${{ github.run_id }}
+        restore-keys: blastcheck-inventory-${{ inputs.org || github.repository_owner }}-
+
+    - name: Run blastcheck
+      shell: bash
+      # Every input goes through the environment, never into the command text.
+      env:
+        IN_MODE: ${{ inputs.mode }}
+        IN_ORG: ${{ inputs.org || github.repository_owner }}
+        IN_PACKAGE: ${{ inputs.package }}
+        IN_ECOSYSTEM: ${{ inputs.ecosystem }}
+        IN_BAD: ${{ inputs.bad-versions }}
+        IN_KIND: ${{ inputs.kind }}
+        IN_LAST_CLEAN: ${{ inputs.last-clean }}
+        IN_URL: ${{ inputs.url }}
+        IN_RECENT_DAYS: ${{ inputs.recent-days }}
+        IN_ALLOW_PUBLIC: ${{ inputs.allow-public }}
+        BLASTCHECK_ORG_TOKEN: ${{ inputs.org-token }}
+        BLASTCHECK_ISSUE_TOKEN: ${{ inputs.issue-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        BLASTCHECK_SLACK_WEBHOOK: ${{ inputs.slack-webhook }}
+        BLASTCHECK_SMTP_HOST: ${{ inputs.smtp-host }}
+        BLASTCHECK_SMTP_PORT: ${{ inputs.smtp-port }}
+        BLASTCHECK_SMTP_USER: ${{ inputs.smtp-user }}
+        BLASTCHECK_SMTP_PASSWORD: ${{ inputs.smtp-password }}
+        BLASTCHECK_MAIL_FROM: ${{ inputs.mail-from }}
+        BLASTCHECK_MAIL_TO: ${{ inputs.mail-to }}
+      run: |
+        if [ -z "$BLASTCHECK_ORG_TOKEN" ]; then
+          echo "::error::The org-token input is empty. Add a secret holding a token with read-only Contents access to the org's repos and pass it as org-token."
+          exit 3
+        fi
+        common=(--org "$IN_ORG" --issue-repo "$GITHUB_REPOSITORY" --notify --quiet)
+        if [ "$IN_ALLOW_PUBLIC" = "true" ]; then common+=(--allow-public-issue-repo); fi
+        case "$IN_MODE" in
+          watch)
+            case "$IN_RECENT_DAYS" in ''|*[!0-9]*) IN_RECENT_DAYS=7 ;; esac
+            blastcheck watch "${common[@]}" --recent-days "$IN_RECENT_DAYS"
+            ;;
+          check)
+            args=(check "${common[@]}")
+            if [ -n "$IN_URL" ]; then
+              args+=(--url "$IN_URL")
+            else
+              args+=(--package "$IN_PACKAGE" --ecosystem "$IN_ECOSYSTEM" --bad "$IN_BAD" --kind "$IN_KIND")
+              if [ -n "$IN_LAST_CLEAN" ]; then args+=(--last-clean "$IN_LAST_CLEAN"); fi
+            fi
+            blastcheck "${args[@]}"
+            ;;
+          *)
+            echo "::error::mode must be 'check' or 'watch'"
+            exit 3
+            ;;
+        esac
+
+    - name: Save the inventory for the next run
+      if: always()
+      uses: actions/cache/save@v4
+      with:
+        path: .blastcheck/inventory.json
+        key: blastcheck-inventory-${{ inputs.org || github.repository_owner }}-${{ github.run_id }}
+
+    - name: Keep the report files
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: blastcheck-${{ inputs.mode }}-${{ github.run_id }}
+        path: .blastcheck/reports/
+        if-no-files-found: ignore
+        retention-days: 30

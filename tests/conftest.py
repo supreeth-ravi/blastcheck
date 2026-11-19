@@ -17,6 +17,7 @@ def no_real_network(monkeypatch):
     def refuse(req, timeout):
         raise AssertionError(f"test tried to reach the network: {req.full_url}")
     monkeypatch.setattr(http, "_open", refuse)
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)  # tests decide for themselves whether they are "in CI"
 
 
 def repo(name, files, errors=(), pushed_at="2026-11-01T00:00:00Z"):

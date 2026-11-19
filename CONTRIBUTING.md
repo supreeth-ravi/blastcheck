@@ -26,7 +26,8 @@ checks dependency risk should not bring any of its own.
 | `src/blastcheck/watch.py` | The daily sweep against OSV |
 | `src/blastcheck/report.py` | The issue, checklist and reply |
 | `src/blastcheck/extract.py` | The optional article reader |
-| `skill/`, `.github/workflows/` | The Claude Code skill and the two workflows |
+| `action.yml`, `examples/` | The GitHub Action and the two workflows users copy into their own private repo |
+| `skill/` | The Claude Code skill |
 
 ## Rules for changes
 
@@ -39,6 +40,7 @@ checks dependency risk should not bring any of its own.
    different, so cached inventories are rebuilt.
 4. **Invented names only** in tests, fixtures and examples: no real organisation, repo or person.
 5. **Tests must not use the network.** They fail if they try.
+7. **This repo never runs a scan.** Its only workflow is the tests. Scan workflows live in `examples/` so that no org's results can end up here.
 6. **Anything that reaches markdown is escaped** with `report.code()` or `report.plain()`.
 
 ## Adding a dependency file format

@@ -1,0 +1,55 @@
+# Copy this file to .github/workflows/incident-check.yml in a PRIVATE repo of your own.
+# All results (issues, logs, caches, reports) stay in that repo. Nothing is sent to blastcheck's repo.
+name: Incident check
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Package name, e.g. agent-framework"
+        required: false
+      ecosystem:
+        description: "Where the package is published"
+        type: choice
+        default: PyPI
+        options: [PyPI, npm, Go, crates.io, Maven]
+      kind:
+        description: "malware = a malicious release; vulnerability = a release with a known security flaw"
+        type: choice
+        default: malware
+        options: [malware, vulnerability]
+      bad_versions:
+        description: "Bad versions, comma-separated, e.g. 1.26.1,1.26.2"
+        required: false
+      last_clean:
+        description: "Last known clean version (optional)"
+        required: false
+      url:
+        description: "Or: an article link to read with Claude (needs the ANTHROPIC_API_KEY secret)"
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: blastcheck
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: phronetic-ai/blastcheck@v0.1.0   # for a stricter setup, pin to a commit SHA
+        with:
+          mode: check
+          org-token: ${{ secrets.BLASTCHECK_ORG_TOKEN }}
+          package: ${{ inputs.package }}
+          ecosystem: ${{ inputs.ecosystem }}
+          kind: ${{ inputs.kind }}
+          bad-versions: ${{ inputs.bad_versions }}
+          last-clean: ${{ inputs.last_clean }}
+          url: ${{ inputs.url }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          slack-webhook: ${{ secrets.BLASTCHECK_SLACK_WEBHOOK }}

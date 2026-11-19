@@ -46,13 +46,18 @@ If you find a case where one of these does not hold, that is a vulnerability.
 5. **Requests stay where they were sent.** HTTPS only; redirects are followed only to the same
    host; responses are size-capped; article links that resolve to private addresses are refused.
 
+6. **Code here, data there.** This repository holds only code and never runs a scan. Results
+   live in the private repo the action is called from. Under GitHub Actions, blastcheck checks
+   that repo's visibility before reading anything and stops if it is public or cannot be
+   confirmed private.
+
 ## Hardening your own install
 
-- Keep the scan repo **private**, and limit who can push to it. Anyone who can run a modified
+- Call the action from a **private** repo, and limit who can push to it. Anyone who can run a modified
   workflow there can read its secrets.
 - Give `BLASTCHECK_ORG_TOKEN` read-only **Contents** access and nothing else.
 - For a stricter setup, put the secrets in a GitHub Environment restricted to the default
-  branch, and pin the actions in the workflows to commit SHAs.
+  branch, and pin `phronetic-ai/blastcheck` in your workflows to a commit SHA rather than a tag.
 
 ## Supported versions
 

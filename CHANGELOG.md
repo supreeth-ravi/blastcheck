@@ -11,7 +11,8 @@ First version.
 - **Daily watch.** Asks OSV about every package the org uses and reports only known-malicious
   releases that match.
 - **Active branches.** Deploy-named and recently pushed branches are read by difference.
-- **Three front ends.** Command line, GitHub Actions workflows, and a Claude Code skill.
+- **Three front ends.** Command line, a GitHub Action called from your own private repo, and a
+  Claude Code skill. The tool's repo holds code only; results stay in the caller's repo.
 - **Optional article reader.** Turns an article link into an unconfirmed incident with Claude.
 - **File formats.** requirements files, pyproject (PEP 621, Poetry, uv, PDM), setup.cfg,
   setup.py, Pipfile, Conda environments, uv/poetry/pdm/Pipfile locks, package.json, npm, yarn
