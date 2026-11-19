@@ -105,9 +105,27 @@ def test_branches_can_be_turned_off_and_listing_failures_are_stated():
 
     gh = FakeGitHub({"branch-bad": ORG["branch-bad"]}, graphql_error=GitHubError(403, "Resource not accessible"))
     inv, _ = inventory.build(gh, "acme-labs", workers=1)
-    assert inv["branch-bad"].branches == () and "could not be listed" in inv["branch-bad"].branch_note
-    body = report.issue_body(EVIL, matcher.match(EVIL, inv.values()), inv, "acme-labs")
+    assert inv["branch-bad"].branches == () and "could not be listed" in inv["branch-bad"].errors[0]
+    results = matcher.match(EVIL, inv.values())
+    assert results[0].verdict == INCOMPLETE                     # never "not used" when branches went unread
+    body = report.issue_body(EVIL, results, inv, "acme-labs")
     assert "other branches could not be listed" in body.replace("\\", "")
+
+
+def test_a_partial_branch_listing_marks_only_the_missing_repos_incomplete():
+    class Partial(FakeGitHub):
+        def graphql(self, query):
+            data = super().graphql(query)
+            data["r1"] = None                                   # GitHub returned nothing for the second repo
+            return data
+    gh = Partial({"same": ORG["same"], "branch-bad": ORG["branch-bad"]})
+    inv, _ = inventory.build(gh, "acme-labs", workers=1)
+    assert not inv["same"].errors and len(inv["same"].branches) == 1
+    assert "could not be listed" in inv["branch-bad"].errors[0]
+    assert matcher.match_repo(EVIL, inv["branch-bad"]).verdict == INCOMPLETE
+    again = FakeGitHub({"same": ORG["same"], "branch-bad": ORG["branch-bad"]})
+    inv2, _ = inventory.build(again, "acme-labs", inv, workers=1)
+    assert again.graphql_calls == 1 and matcher.match_repo(EVIL, inv2["branch-bad"]).verdict == AFFECTED   # retried
 
 
 def test_report_and_reply_name_the_branch_and_the_coverage():

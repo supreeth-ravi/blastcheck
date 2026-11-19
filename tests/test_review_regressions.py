@@ -164,3 +164,16 @@ def test_a_lock_file_broken_by_a_bad_merge_is_salvaged_not_dropped():
     assert verdict(EVIL, {"svc/uv.lock": broken}) == AFFECTED
     with pytest.raises(Exception):
         parsers.parse("uv.lock", "[[package\nname =")           # nothing salvageable: still an error
+
+
+def test_salvage_refuses_partial_recovery_and_is_linear_on_hostile_input():
+    import time
+    partial = lock(("evilpkg", "0.9")) + '[[package]]\nname = "half"\n\n[package.metadata]\nx = 1\n\n[package.metadata]\nx = 2\n'
+    with pytest.raises(ValueError, match="only 1 of 2 entries"):
+        parsers.parse("uv.lock", partial)
+    assert verdict(EVIL, {"requirements.txt": "x==1\n"}) == NOT_USED
+    hostile = "[[package]]\n" + "junk = 1\n" * 200_000 + "[[x\n"
+    started = time.perf_counter()
+    with pytest.raises(Exception):
+        parsers.parse("uv.lock", hostile)
+    assert time.perf_counter() - started < 2.0

@@ -123,7 +123,8 @@ def _read_branch(gh: GitHub, full_name: str, chosen: Pick, default: _TreeRead, t
                            tuple(read.errors), tuple(new_unparsed))
 
 
-def read_repo(gh: GitHub, repo: dict, picks: tuple[Pick, ...] = (), branch_note: str = "") -> RepoInventory:
+def read_repo(gh: GitHub, repo: dict, picks: tuple[Pick, ...] = (), branch_note: str = "",
+              branch_error: str = "") -> RepoInventory:
     """Read one repo's dependency files. Never raises: failures are recorded on the result."""
     name, full_name = repo["name"], repo["full_name"]
     pushed_at = repo.get("pushed_at") or ""
@@ -137,7 +138,8 @@ def read_repo(gh: GitHub, repo: dict, picks: tuple[Pick, ...] = (), branch_note:
     texts: dict[str, str] = {}
     default = _read_tree(gh, full_name, tree, texts)
     others = tuple(_read_branch(gh, full_name, chosen, default, texts) for chosen in picks)
-    return RepoInventory(name, pushed_at, tuple(default.deps), tuple(default.errors), len(default.read_paths),
+    errors = default.errors + ([branch_error] if branch_error else [])
+    return RepoInventory(name, pushed_at, tuple(default.deps), tuple(errors), len(default.read_paths),
                          unparsed=tuple(default.unparsed), branches=others, branch_note=branch_note)
 
 
@@ -165,17 +167,18 @@ def build(gh: GitHub, owner: str, cache: dict[str, RepoInventory] | None = None,
     if progress:
         progress(f"{len(repos)} repos: {len(fresh)} unchanged, {len(stale)} to read")
 
-    plan: dict[str, tuple[tuple[Pick, ...], str]] = {}
-    plan_failure = "" if settings.enabled else "other branches were not checked (turned off)"
+    plan: dict[str, tuple[tuple[Pick, ...], str, str]] = {}
+    fallback = ((), "" if settings.enabled else "other branches were not checked (turned off)", "")
     if settings.enabled and stale:
         try:
             plan = branches_mod.plan(gh, owner, [r["name"] for r in stale], settings)
         except GitHubError as exc:
-            plan_failure = f"other branches could not be listed, so only the default branch was checked ({exc})"
+            # Branches were asked for and could not be listed: every repo is not fully read.
+            fallback = ((), "", f"{branches_mod.NOT_LISTED}: {exc}")
 
     def work(repo: dict) -> RepoInventory:
-        picks, note = plan.get(repo["name"], ((), plan_failure))
-        result = read_repo(gh, repo, picks, note)
+        picks, note, branch_error = plan.get(repo["name"], fallback)
+        result = read_repo(gh, repo, picks, note, branch_error)
         if progress:
             progress(f"read {repo['name']}: {result.files_read} files, {len(result.branches)} other branches, "
                      f"{len(result.errors)} problems")

@@ -73,23 +73,34 @@ def pick(nodes: list[dict], total: int, default_name: str, default_head: str, se
     return tuple(item[1] for item in chosen[: settings.limit]), "; ".join(notes)
 
 
+NOT_LISTED = "other branches could not be listed, so only the default branch was read (use --no-branches to skip them)"
+
+
 def plan(gh: GitHub, owner: str, repo_names: list[str], settings: Settings,
-         now: datetime | None = None) -> dict[str, tuple[tuple[Pick, ...], str]]:
-    """Picks and note for every repo name given. Raises GitHubError if branches cannot be listed."""
+         now: datetime | None = None) -> dict[str, tuple[tuple[Pick, ...], str, str]]:
+    """(picks, note, error) for every repo name given.
+
+    `error` is non-empty when that repo's branches could not be listed: the caller must treat
+    the repo as not fully read. Raises GitHubError if the request itself fails.
+    """
     now = now or datetime.now(timezone.utc)
-    result: dict[str, tuple[tuple[Pick, ...], str]] = {}
+    result: dict[str, tuple[tuple[Pick, ...], str, str]] = {}
     names = [name for name in repo_names if _SAFE_NAME.match(name)]
     for name in set(repo_names) - set(names):
-        result[name] = ((), "other branches were not listed (unusual repo name)")
+        result[name] = ((), "", NOT_LISTED)
     for start in range(0, len(names), CHUNK):
         chunk = names[start:start + CHUNK]
         fragments = [_REPO_FRAGMENT % (i, json.dumps(owner), json.dumps(name), LISTED_PER_REPO)
                      for i, name in enumerate(chunk)]
         data = gh.graphql("query {\n" + "\n".join(fragments) + "\n}")
         for i, name in enumerate(chunk):
-            repo = data.get(f"r{i}") or {}
+            repo = data.get(f"r{i}")
+            refs = repo.get("refs") if isinstance(repo, dict) else None
+            if not isinstance(refs, dict) or not isinstance(refs.get("nodes"), list):
+                result[name] = ((), "", NOT_LISTED)  # partial GraphQL failure: never read it as "no branches"
+                continue
             default = repo.get("defaultBranchRef") or {}
-            refs = repo.get("refs") or {}
-            result[name] = pick(refs.get("nodes") or [], refs.get("totalCount") or 0, default.get("name", ""),
-                                (default.get("target") or {}).get("oid", ""), settings, now)
+            picks, note = pick(refs["nodes"], refs.get("totalCount") or 0, default.get("name", ""),
+                               (default.get("target") or {}).get("oid", ""), settings, now)
+            result[name] = (picks, note, "")
     return result

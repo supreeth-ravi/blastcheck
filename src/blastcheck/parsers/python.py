@@ -170,23 +170,49 @@ def parse_conda_env(file: str, text: str) -> list[Dep]:
     return deps
 
 
-_LOCK_ENTRY = re.compile(r'^\[\[package\]\]\s*\n(?:[^\[\n][^\n]*\n)*?name\s*=\s*"([^"]+)"\s*\n'
-                         r'(?:[^\[\n][^\n]*\n)*?version\s*=\s*"([^"]+)"', re.M)
+_LOCK_KEY = re.compile(r'^(name|version)\s*=\s*"([^"]*)"\s*$')
 
 
 def _salvage_lock(file: str, text: str) -> list[Dep]:
     """Read name/version pairs from a lock file that is not valid TOML (for example after a bad
     merge left a duplicated section). Both sides of such a merge are kept, which is what an
-    incident check wants."""
-    return [Dep(file=file, ecosystem="PyPI", name=normalise(name), version=version, spec=f"=={version}", exact=True)
-            for name, version in _LOCK_ENTRY.findall(text)]
+    incident check wants.
+
+    A plain line scan, linear in the file size. Every `[[package]]` block must yield a name and
+    a version; if any block does not, the salvage is refused so the file is reported as unread.
+    """
+    deps: list[Dep] = []
+    blocks = 0
+    current: dict[str, str] | None = None
+
+    def close(block: dict[str, str] | None) -> None:
+        if block is not None and block.get("name") and block.get("version"):
+            deps.append(Dep(file=file, ecosystem="PyPI", name=normalise(block["name"]), version=block["version"],
+                            spec=f"=={block['version']}", exact=True))
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped == "[[package]]":
+            close(current)
+            current, blocks = {}, blocks + 1
+        elif stripped.startswith("["):
+            close(current)
+            current = None  # a sub-table such as [package.metadata]: not part of the entry's own keys
+        elif current is not None:
+            key = _LOCK_KEY.match(stripped)
+            if key and key.group(1) not in current:
+                current[key.group(1)] = key.group(2)
+    close(current)
+    if len(deps) != blocks:
+        raise ValueError(f"lock file is not valid and only {len(deps)} of {blocks} entries could be recovered")
+    return deps
 
 
 def parse_toml_lock(file: str, text: str) -> list[Dep]:
     try:
         data = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
-        salvaged = _salvage_lock(file, text)
+        salvaged = _salvage_lock(file, text)  # raises if any entry cannot be recovered
         if not salvaged:
             raise
         return salvaged
