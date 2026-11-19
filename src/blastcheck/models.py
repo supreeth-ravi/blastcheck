@@ -79,6 +79,7 @@ class RepoInventory:
     unparsed: tuple[str, ...] = ()  # "ecosystem:path" for dependency files we cannot parse
     branches: tuple[BranchInventory, ...] = ()  # other branches that were checked
     branch_note: str = ""  # anything that limited which branches were checked
+    visibility: str = ""  # "private" or "public" as GitHub reported it; empty when unknown
 
     def to_json(self) -> dict:
         """Compact form for the cache: each dependency is a short list, not an object."""
@@ -100,6 +101,7 @@ class RepoInventory:
             unparsed=tuple(data.get("unparsed", ())),
             branches=tuple(BranchInventory.from_json(b) for b in data.get("branches", ())),
             branch_note=data.get("branch_note", ""),
+            visibility=data.get("visibility", ""),
         )
 
 

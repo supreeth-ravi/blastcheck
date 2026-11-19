@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.1 — 2026-11-19
+
+- Warns, in the report, the reply and `setup`, when the token can only see public repos. A token
+  cannot list what it has no access to, so missing private repos are otherwise invisible.
+
 ## 0.1.0 — 2026-11-19
 
 First version.

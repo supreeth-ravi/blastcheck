@@ -213,3 +213,28 @@ def test_in_ci_a_public_or_unverifiable_repo_stops_everything_before_any_read(wi
     gh.is_private = private_check
     assert cli.main([*args, "--issue-repo", "acme-labs/scan"]) == 1 and len(gh.issues) == 1     # private: runs
     assert cli.main([*args, "--issue-repo", "acme-labs/scan-public", "--allow-public-issue-repo"]) == 1
+
+
+def test_a_token_that_sees_only_public_repos_is_called_out_everywhere(wired_cli, capsys):
+    gh, base, tmp = wired_cli
+    gh.repos = {"svc-ok": {"files": {"requirements.txt": "flask==3.0.0\n"}}, "svc-two": {"files": {}}}
+    gh.all_public = True
+    args = ["check", *base, "--package", "agent-framework", "--ecosystem", "pypi", "--bad", "1.26.2", "--no-confirm",
+            "--out", str(tmp / "out"), "--issue-repo", "acme-labs/scan"]
+    assert cli.main(args) == 0
+    out = capsys.readouterr().out
+    assert "WARNING: Only public repos were visible" in out
+    assert "We checked the 2 public repos" in out and "not yet an answer for the organisation" in out
+    assert "We checked all" not in out
+    assert "**Warning: Only public repos were visible to the token." in gh.issues[0][2]
+    assert cli.main(["setup", *base]) == 0
+    assert "0 private and 2 public repos are visible" in capsys.readouterr().err
+
+
+def test_a_mixed_or_private_org_gets_no_public_only_warning(wired_cli, capsys):
+    gh, base, tmp = wired_cli
+    gh.repos = {"svc-ok": {"files": {"requirements.txt": "flask==3.0.0\n"}}, "open-one": {"files": {}, "public": True}}
+    assert cli.main(["check", *base, "--package", "agent-framework", "--ecosystem", "pypi", "--bad", "1.26.2",
+                     "--no-confirm", "--out", str(tmp / "out")]) == 0
+    out = capsys.readouterr().out
+    assert "WARNING" not in out and "We checked all 2 repos" in out

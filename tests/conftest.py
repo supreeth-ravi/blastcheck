@@ -100,7 +100,8 @@ class FakeGitHub:
 
     def list_repos(self, owner):
         return [{"name": n, "full_name": f"{owner}/{n}", "pushed_at": r.get("pushed_at", "t1"),
-                 "default_branch": "main", "archived": r.get("archived", False)} for n, r in self.repos.items()]
+                 "default_branch": "main", "archived": r.get("archived", False),
+                 "private": not r.get("public", getattr(self, "all_public", False))} for n, r in self.repos.items()]
 
     def graphql(self, query):
         self.graphql_calls += 1

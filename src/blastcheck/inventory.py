@@ -21,7 +21,7 @@ from .models import BranchInventory, Dep, RepoInventory
 
 log = logging.getLogger(__name__)
 # Includes the parser version: improving a parser must invalidate what older parsers extracted.
-CACHE_VERSION = f"3.{parsers.PARSER_VERSION}"
+CACHE_VERSION = f"4.{parsers.PARSER_VERSION}"
 SYMLINK_MODE = "120000"
 
 
@@ -128,19 +128,21 @@ def read_repo(gh: GitHub, repo: dict, picks: tuple[Pick, ...] = (), branch_note:
     """Read one repo's dependency files. Never raises: failures are recorded on the result."""
     name, full_name = repo["name"], repo["full_name"]
     pushed_at = repo.get("pushed_at") or ""
+    visibility = "" if "private" not in repo else ("private" if repo["private"] else "public")
     try:
         tree = gh.tree(full_name, repo.get("default_branch") or "HEAD")
     except GitHubError as exc:
         if exc.status == 409:
-            return RepoInventory(name, pushed_at, note="empty repository")
-        return RepoInventory(name, pushed_at, errors=(f"could not list files: {exc}",))
+            return RepoInventory(name, pushed_at, note="empty repository", visibility=visibility)
+        return RepoInventory(name, pushed_at, errors=(f"could not list files: {exc}",), visibility=visibility)
 
     texts: dict[str, str] = {}
     default = _read_tree(gh, full_name, tree, texts)
     others = tuple(_read_branch(gh, full_name, chosen, default, texts) for chosen in picks)
     errors = default.errors + ([branch_error] if branch_error else [])
     return RepoInventory(name, pushed_at, tuple(default.deps), tuple(errors), len(default.read_paths),
-                         unparsed=tuple(default.unparsed), branches=others, branch_note=branch_note)
+                         unparsed=tuple(default.unparsed), branches=others, branch_note=branch_note,
+                         visibility=visibility)
 
 
 def build(gh: GitHub, owner: str, cache: dict[str, RepoInventory] | None = None, include_archived: bool = False,
