@@ -91,6 +91,20 @@ def fetch_article(url: str) -> str:
     return text
 
 
+def _api_failure(exc: Exception) -> str:
+    """One line for a failed Claude request. Never includes the key or the response body."""
+    status = getattr(exc, "status_code", None)
+    if status in (401, 403):
+        reason = "the API key was rejected; check ANTHROPIC_API_KEY"
+    elif status == 429:
+        reason = "the API rate or spend limit was reached"
+    elif status:
+        reason = f"the API answered with status {status}"
+    else:
+        reason = type(exc).__name__
+    return f"could not read the article with Claude: {reason}. Give the package and versions directly instead"
+
+
 def extract(article_text: str, url: str, client: object | None = None) -> Incident:
     """Ask Claude for the incident fields. Requires the optional `anthropic` package and a key."""
     if client is None:
@@ -99,15 +113,18 @@ def extract(article_text: str, url: str, client: object | None = None) -> Incide
         except ImportError as exc:
             raise ExtractError("reading an article needs the AI extra: pip install 'blastcheck[ai]'") from exc
         client = anthropic.Anthropic()
-    response = client.beta.messages.create(  # type: ignore[attr-defined]
-        model=MODEL,
-        max_tokens=4000,
-        system=SYSTEM,
-        betas=["server-side-fallback-2026-07-01"],
-        fallbacks="default",
-        output_config={"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}},
-        messages=[{"role": "user", "content": f"<article>\n{article_text}\n</article>"}],
-    )
+    try:
+        response = client.beta.messages.create(  # type: ignore[attr-defined]
+            model=MODEL,
+            max_tokens=4000,
+            system=SYSTEM,
+            betas=["server-side-fallback-2026-07-01"],
+            fallbacks="default",
+            output_config={"effort": "low", "format": {"type": "json_schema", "schema": SCHEMA}},
+            messages=[{"role": "user", "content": f"<article>\n{article_text}\n</article>"}],
+        )
+    except Exception as exc:  # noqa: BLE001 - any SDK or network failure becomes one clear message
+        raise ExtractError(_api_failure(exc)) from exc
     if response.stop_reason == "refusal":
         raise ExtractError("the model declined to read this article; give the package and versions directly instead")
     if response.stop_reason == "max_tokens":

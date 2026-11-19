@@ -10,7 +10,7 @@
 When a dependency you rely on is hijacked or found vulnerable, blastcheck checks every repo in your GitHub org and drafts the reply. It runs in your own setup, on your own credentials. Nothing is hosted and your code is never sent anywhere.
 
 [![Tests](https://img.shields.io/github/actions/workflow/status/phronetic-ai/blastcheck/test.yml?branch=main&style=flat-square&label=tests)](https://github.com/phronetic-ai/blastcheck/actions/workflows/test.yml)
-[![Version](https://img.shields.io/badge/version-0.1.4-111?style=flat-square)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.1.5-111?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111?style=flat-square)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-%E2%89%A53.11-111?style=flat-square)](https://www.python.org)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-111?style=flat-square)](pyproject.toml)
@@ -29,7 +29,9 @@ confirmed: OSV lists MAL-2026-20101 for agent-framework 1.26.1
 
 We checked all 142 repos. None pin an affected version of agent-framework (1.26.1 and 1.26.2),
 but 2 use it with a loose version range that could have pulled one: billing-api, ops-notebooks.
-We are checking when those were last installed and pinning them to a safe version.
+Recommended next step: check when those were last installed and pin them to a safe
+version. This covers what the repos declare. It does not cover packages installed by hand on
+laptops, servers or in built images.
 ```
 
 <p align="center"><sub><code>acme-labs</code> and its repos are invented. The advisory is real.</sub></p>
@@ -247,7 +249,7 @@ The code lives here; your results never do. You call blastcheck from a **private
 
 The result is an issue in your repo, labelled `blastcheck`. The daily watch starts running by itself at 02:30 UTC.
 
-`@v0` follows the latest 0.x release. To pin exactly, use a release tag such as `@v0.1.4` or a commit SHA.
+`@v0` follows the latest 0.x release. To pin exactly, use a release tag such as `@v0.1.5` or a commit SHA.
 
 **The scan covers exactly the repos the token has access to.** Give it the whole org or only a chosen set; every report states how many private and public repos were in scope. If you want a guard against a token losing access, set `expect-repos` and the run stops when it sees fewer.
 

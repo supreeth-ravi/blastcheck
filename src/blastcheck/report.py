@@ -159,14 +159,14 @@ def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[st
     name = incident.package
     if worst == AFFECTED:
         body = (f"{opening}. {len(affected)} pin an affected version of {name} ({bad}): {', '.join(affected)}. "
-                f"We are treating this as an incident: rebuilding those environments and rotating the credentials "
-                f"they could reach.")
+                f"Recommended next step: treat this as an incident, rebuild those environments and rotate the "
+                f"credentials they could reach.")
         if at_risk:
             body += f" A further {len(at_risk)} use a loose version range that could have pulled one: {', '.join(at_risk)}."
     elif worst == AT_RISK:
         body = (f"{opening}. None pin an affected version of {name} ({bad}), but {len(at_risk)} use it with a loose "
-                f"version range that could have pulled one: {', '.join(at_risk)}. We are checking when those were "
-                f"last installed and pinning them to a safe version.")
+                f"version range that could have pulled one: {', '.join(at_risk)}. Recommended next step: check when "
+                f"those were last installed and pin them to a safe version.")
     elif worst == INCOMPLETE:
         body = f"{opening} and found no use of the affected versions of {name} ({bad}) in the ones we could read."
     else:
@@ -175,7 +175,8 @@ def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[st
             where += f" or on the {branches_checked} other active branches we checked"
         body = (f"{opening}. None of them currently use the affected versions of {name} ({bad}) {where}, "
                 f"so no remediation is needed in our code.")
-    return body + caveat + " As a precaution we are confirming nobody installed it manually, and blocking those versions."
+    return body + caveat + (" This covers what the repos declare. It does not cover packages installed by hand on "
+                            "laptops, servers or in built images.")
 
 
 def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories: dict[str, RepoInventory],

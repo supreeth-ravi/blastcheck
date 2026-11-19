@@ -75,7 +75,7 @@ def test_clean_report_says_so_and_skips_incident_steps(agent_framework, fake_org
 def test_replies_for_each_headline(agent_framework, fake_org):
     def reply_for(names):
         return report.reply(agent_framework, matcher.match(agent_framework, [r for r in fake_org if r.repo in names]))
-    assert "treating this as an incident" in reply_for({"pinned-bad", "empty"})
+    assert "treat this as an incident" in reply_for({"pinned-bad", "empty"})
     assert "loose version range" in reply_for({"loose-no-lock", "empty"})
     assert "not yet a complete answer" in reply_for({"broken", "empty"})
 

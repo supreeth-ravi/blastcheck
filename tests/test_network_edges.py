@@ -221,3 +221,20 @@ def test_github_turns_an_unreadable_body_into_a_read_failure(monkeypatch):
         github.GitHub("t").tree("acme-labs/r", "main")
     with pytest.raises(github.GitHubError):
         github.GitHub("t").graphql("query {}")
+
+
+def test_a_rejected_api_key_is_a_clear_error_not_a_crash():
+    class Rejected(Exception):
+        status_code = 401
+
+    class Client:
+        class beta:  # noqa: N801
+            class messages:  # noqa: N801
+                @staticmethod
+                def create(**_):
+                    raise Rejected("invalid x-api-key sk-secret")
+
+    with pytest.raises(extract.ExtractError) as caught:
+        extract.extract("article text", "https://example.test/post", client=Client())
+    assert "API key was rejected" in str(caught.value)
+    assert "sk-secret" not in str(caught.value)

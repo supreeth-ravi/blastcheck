@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.5 — 2026-11-19
+
+- The drafted reply states only what the scan did. Follow-ups are worded as recommended next
+  steps, and the reply ends by saying what the scan does not cover.
+- A rejected Claude API key, a rate limit or a network failure while reading an article is now
+  one clear message and exit code 3, not a traceback.
+
 ## 0.1.4 — 2026-11-19
 
 - Release housekeeping, no change to verdicts. A moving `v0` tag now follows the latest 0.x
