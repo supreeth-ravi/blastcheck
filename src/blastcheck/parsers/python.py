@@ -170,8 +170,26 @@ def parse_conda_env(file: str, text: str) -> list[Dep]:
     return deps
 
 
+_LOCK_ENTRY = re.compile(r'^\[\[package\]\]\s*\n(?:[^\[\n][^\n]*\n)*?name\s*=\s*"([^"]+)"\s*\n'
+                         r'(?:[^\[\n][^\n]*\n)*?version\s*=\s*"([^"]+)"', re.M)
+
+
+def _salvage_lock(file: str, text: str) -> list[Dep]:
+    """Read name/version pairs from a lock file that is not valid TOML (for example after a bad
+    merge left a duplicated section). Both sides of such a merge are kept, which is what an
+    incident check wants."""
+    return [Dep(file=file, ecosystem="PyPI", name=normalise(name), version=version, spec=f"=={version}", exact=True)
+            for name, version in _LOCK_ENTRY.findall(text)]
+
+
 def parse_toml_lock(file: str, text: str) -> list[Dep]:
-    data = tomllib.loads(text)
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        salvaged = _salvage_lock(file, text)
+        if not salvaged:
+            raise
+        return salvaged
     deps = [
         Dep(file=file, ecosystem="PyPI", name=normalise(pkg["name"]), version=str(pkg["version"]),
             spec=f"=={pkg['version']}", exact=True)

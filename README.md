@@ -88,6 +88,23 @@ Copy `skill/incident-check` into `~/.claude/skills/`, then:
 Claude Code reads the article, runs `blastcheck` with your `gh` login and reports the result.
 No API key is needed for this route.
 
+## Which branches are read
+
+Each repo's default branch, plus branches whose code is likely being installed now:
+
+- branches named like a deploy target (`develop`, `staging`, `uat`, `prod`, `release/…`, `hotfix/…`)
+- branches pushed in the last 30 days
+
+This stays cheap because a branch is read by difference. One request lists a branch's files with
+a content fingerprint for each, and a dependency file identical to the default branch's is never
+downloaded. A finding on a branch names that branch in the report.
+
+| Flag | Effect |
+|---|---|
+| `--branch-days 90` | Widen (or narrow) the recency window; `0` keeps only deploy-named branches |
+| `--max-branches 15` | Most extra branches read per repo; the report says if any were left out |
+| `--no-branches` | Default branches only |
+
 ## What leaves your environment
 
 | Sent to | What |
@@ -109,7 +126,7 @@ Repo contents are not sent to OSV, the registry or Claude.
 
 ## What it does not cover
 
-- Branches other than the default branch, and past states of a lock file
+- Branches that are neither deploy-named nor recently pushed (see below), and past states of a lock file
 - Archived repos, unless you pass `--include-archived` (the report says how many were skipped)
 - Dockerfiles and CI workflow files (`pip install` lines there are a known blind spot)
 - Gradle files and Bun lock files: a repo that has them is reported as "could not fully check"

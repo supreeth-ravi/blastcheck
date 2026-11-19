@@ -54,17 +54,19 @@ def _by_verdict(results: Iterable[RepoResult], verdict: str) -> list[RepoResult]
 
 
 def _evidence_rows(results: list[RepoResult]) -> list[str]:
-    rows = ["| Repo | File | Declared as |", "|---|---|---|"]
+    rows = ["| Repo | Branch | File | Declared as |", "|---|---|---|---|"]
     total = sum(len(r.evidence) for r in results)
     count = 0
     for result in results:
         for dep in result.evidence:
             if count >= MAX_ROWS:
-                rows.append(f"| … | {total - count} more rows not shown | |")
+                rows.append(f"| … | | {total - count} more rows not shown | |")
                 return rows
             joiner = "@" if dep.ecosystem == "npm" else (" " if dep.ecosystem in ("Go", "crates.io", "Maven") else "")
             declared = f"{dep.name}{joiner}{dep.spec}" if dep.spec else f"{dep.name} (no version)"
-            rows.append(f"| {code(result.repo, table=True)} | {code(dep.file, table=True)} | {code(declared, table=True)} |")
+            branch = code(dep.ref, table=True) if dep.ref else "default"
+            rows.append(f"| {code(result.repo, table=True)} | {branch} | {code(dep.file, table=True)} "
+                        f"| {code(declared, table=True)} |")
             count += 1
     return rows
 
@@ -128,7 +130,16 @@ def _coverage(results: tuple[RepoResult, ...], skipped: tuple[str, ...]) -> tupl
     return opening, (" " + ". ".join(caveats) + ".") if caveats else ""
 
 
-def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[str, ...] = ()) -> str:
+def branch_coverage(inventories: dict[str, RepoInventory]) -> tuple[int, int, list[str]]:
+    """(other branches checked, how many differed in dependency files, notes on limits)."""
+    checked = sum(len(inv.branches) for inv in inventories.values())
+    differing = sum(1 for inv in inventories.values() for branch in inv.branches if branch.differs)
+    notes = Counter(inv.branch_note for inv in inventories.values() if inv.branch_note)
+    return checked, differing, [f"{note} ({count} {'repo' if count == 1 else 'repos'})" for note, count in notes.most_common(4)]
+
+
+def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[str, ...] = (),
+          branches_checked: int = 0) -> str:
     """A short plain-text answer suitable for forwarding. Never overstates what was checked."""
     worst = headline(results)
     opening, caveat = _coverage(results, skipped)
@@ -149,8 +160,11 @@ def reply(incident: Incident, results: tuple[RepoResult, ...], skipped: tuple[st
     elif worst == INCOMPLETE:
         body = f"{opening} and found no use of the affected versions of {name} ({bad}) in the ones we could read."
     else:
-        body = (f"{opening}. None of them currently use the affected versions of {name} ({bad}) on their default "
-                f"branches, so no remediation is needed in our code.")
+        where = "on their default branches"
+        if branches_checked:
+            where += f" or on the {branches_checked} other active branches we checked"
+        body = (f"{opening}. None of them currently use the affected versions of {name} ({bad}) {where}, "
+                f"so no remediation is needed in our code.")
     return body + caveat + " As a precaution we are confirming nobody installed it manually, and blocking those versions."
 
 
@@ -159,6 +173,7 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
     now = now or datetime.now(timezone.utc)
     worst = headline(results)
     counts = Counter(r.verdict for r in results)
+    checked, differing, branch_notes = branch_coverage(inventories)
     lines = [
         marker(incident),
         f"## {HEADLINES[worst]}",
@@ -174,7 +189,9 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
         _confirmation_line(incident),
         "",
         f"Checked **{len(results)}** repos in {code(owner)} on {now:%Y-%m-%d %H:%M} UTC."
-        + (f" **{len(skipped)}** archived repos were skipped." if skipped else ""),
+        + (f" **{len(skipped)}** archived repos were skipped." if skipped else "")
+        + (f" Besides each default branch, **{checked}** other branches were checked (deploy-named or recently "
+           f"pushed); {differing} of them differ in their dependency files." if checked else ""),
         "",
         "| Verdict | Repos |",
         "|---|---:|",
@@ -198,22 +215,28 @@ def issue_body(incident: Incident, results: tuple[RepoResult, ...], inventories:
             lines.append(f"- … and {len(unread) - MAX_ROWS} more")
         lines.append("")
     lines += ["### What to do", "", *_checklist(incident, results, skipped), "", "### Ready-to-send reply", "",
-              "> " + plain(reply(incident, results, skipped), 2000), ""]
+              "> " + plain(reply(incident, results, skipped, checked), 2000), ""]
     if incident.sources:
         lines += ["### Sources", "", *[f"- <{source}>" for source in incident.sources], ""]
     pushed = [inv.pushed_at for inv in inventories.values() if inv.pushed_at]
     lines += [
         "---",
-        "Scope: dependency and lock files on each repo's default branch, as they are now. Not covered: other "
-        "branches, past states of a lock file, Dockerfiles, CI workflow files, Gradle and Bun files, "
+        "Scope: dependency and lock files on each repo's default branch"
+        + (f" and on {checked} other active branches" if checked else "")
+        + ", as they are now. Not covered: "
+        + ("the remaining branches" if checked else "other branches")
+        + ", past states of a lock file, Dockerfiles, CI workflow files, Gradle and Bun files, "
         "and what is installed on laptops or servers."
-        + (f" Most recent push seen: {max(pushed)[:10]}." if pushed else ""),
+        + (f" Most recent push seen: {max(pushed)[:10]}." if pushed else "")
+        + ("".join(f" Note: {plain(note)}." for note in branch_notes)),
     ]
     return "\n".join(lines)
 
 
-def summary(incident: Incident, results: tuple[RepoResult, ...], owner: str, skipped: tuple[str, ...] = ()) -> dict:
+def summary(incident: Incident, results: tuple[RepoResult, ...], owner: str, skipped: tuple[str, ...] = (),
+            inventories: dict[str, RepoInventory] | None = None) -> dict:
     counts = Counter(r.verdict for r in results)
+    checked, differing, branch_notes = branch_coverage(inventories or {})
     return {
         "owner": owner,
         "package": incident.package,
@@ -223,7 +246,11 @@ def summary(incident: Incident, results: tuple[RepoResult, ...], owner: str, ski
         "headline": headline(results),
         "repos_checked": len(results),
         "archived_skipped": list(skipped),
+        "other_branches_checked": checked,
+        "other_branches_differing": differing,
+        "branch_notes": branch_notes,
+        "branch_findings": sorted({f"{r.repo}@{dep.ref}" for r in results for dep in r.evidence if dep.ref}),
         "counts": dict(counts),
         "repos": {v: [r.repo for r in _by_verdict(results, v)] for v in (AFFECTED, AT_RISK, SAFE_VERSION, INCOMPLETE)},
-        "reply": reply(incident, results, skipped),
+        "reply": reply(incident, results, skipped, checked),
     }

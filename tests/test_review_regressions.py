@@ -101,8 +101,8 @@ def test_untrusted_text_cannot_inject_markdown_into_the_issue():
     results = matcher.match(incident, [inv, broken])
     body = report.issue_body(incident, results, {}, "acme-labs")
     rows = [line for line in body.splitlines() if line.startswith("| `r`")]
-    assert len(rows) == 1 and rows[0].count(" | ") == 2          # the table row was not split
-    assert "`" not in rows[0].split(" | ")[1][1:-1]             # the code span cannot be closed from inside
+    assert len(rows) == 1 and rows[0].count(" | ") == 3          # the table row was not split
+    assert "`" not in rows[0].split(" | ")[2][1:-1]             # the code span cannot be closed from inside
     outside_code = "\n".join(line for line in body.splitlines() if not line.startswith("| `r`"))
     assert "\\!\\[i\\]\\(https://evil.example/t.png\\)" in outside_code      # image syntax neutralised
     assert "\\[x\\]\\(https://evil.example\\)" in outside_code                 # link syntax neutralised
@@ -153,3 +153,14 @@ def test_conda_environment_files_are_read():
     assert verdict(EVIL, {"environment.yaml": pip_pinned}) == AFFECTED
     assert verdict(EVIL, {"environment.yml": "dependencies:\n  - evilpkg=1.0=build7\n"}) == AFFECTED
     assert verdict(EVIL, {"environment.yml": "dependencies:\n  - evilpkg=2.0\n"}) == SAFE_VERSION
+
+
+def test_a_lock_file_broken_by_a_bad_merge_is_salvaged_not_dropped():
+    broken = lock(("evilpkg", "0.9")) + lock(("evilpkg", "1.0")) + "[package.metadata]\nx = 1\n\n[package.metadata]\nx = 2\n"
+    with pytest.raises(Exception):
+        __import__("tomllib").loads(broken)
+    versions_found = sorted(d.version for d in parsers.parse("svc/uv.lock", broken))
+    assert versions_found == ["0.9", "1.0"]
+    assert verdict(EVIL, {"svc/uv.lock": broken}) == AFFECTED
+    with pytest.raises(Exception):
+        parsers.parse("uv.lock", "[[package\nname =")           # nothing salvageable: still an error

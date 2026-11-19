@@ -7,40 +7,7 @@ from blastcheck import cli, confirm, http, inventory, notify
 from blastcheck.github import GitHubError
 from blastcheck.models import Incident
 
-
-class FakeGitHub:
-    """Serves an invented org from memory and counts what is fetched."""
-
-    def __init__(self, repos):
-        self.repos = repos  # name -> {"files": {path: text}, "pushed_at":..., flags}
-        self.blob_reads = 0
-        self.issues = []
-
-    def list_repos(self, owner):
-        return [{"name": n, "full_name": f"{owner}/{n}", "pushed_at": r.get("pushed_at", "t1"),
-                 "default_branch": "main", "archived": r.get("archived", False)} for n, r in self.repos.items()]
-
-    def tree(self, full_name, ref):
-        spec = self.repos[full_name.split("/")[1]]
-        if spec.get("empty"):
-            raise GitHubError(409, "Git Repository is empty")
-        if spec.get("forbidden"):
-            raise GitHubError(403, "Resource not accessible")
-        entries = [{"path": p, "type": "blob", "sha": f"{full_name}:{p}", "size": spec.get("size", len(t))}
-                   for p, t in spec["files"].items()]
-        return {"tree": entries, "truncated": spec.get("truncated", False)}
-
-    def blob_text(self, full_name, sha):
-        self.blob_reads += 1
-        name, path = sha.split("/", 1)[1].split(":", 1)
-        return self.repos[name]["files"][path]
-
-    def is_private(self, repo):
-        return not repo.endswith("-public")
-
-    def upsert_issue(self, repo, marker, title, body):
-        self.issues.append((repo, title, body))
-        return "https://example.test/issues/1"
+from conftest import FakeGitHub
 
 
 ORG = {

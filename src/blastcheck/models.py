@@ -24,6 +24,45 @@ class Dep:
     version: str | None  # exact version when known, else None
     spec: str  # the raw specifier as written
     exact: bool  # True when `version` is what will be installed
+    ref: str = ""  # branch the line was found on; empty means the default branch
+
+
+def _deps_to_json(deps: tuple[Dep, ...]) -> list[list]:
+    return [[d.file, d.ecosystem, d.name, d.version, d.spec, d.exact] for d in deps]
+
+
+def _deps_from_json(rows: object) -> tuple[Dep, ...]:
+    return tuple(Dep(*row) for row in rows or ())  # type: ignore[union-attr]
+
+
+@dataclass(frozen=True)
+class BranchInventory:
+    """What one non-default branch changes about the repo's dependency files."""
+
+    ref: str
+    head: str
+    reason: str  # why this branch was picked
+    deps: tuple[Dep, ...] = ()  # from files that differ from the default branch
+    changed_paths: tuple[str, ...] = ()
+    removed_paths: tuple[str, ...] = ()
+    errors: tuple[str, ...] = ()
+    unparsed: tuple[str, ...] = ()
+
+    @property
+    def differs(self) -> bool:
+        return bool(self.changed_paths or self.removed_paths or self.unparsed or self.errors)
+
+    def to_json(self) -> dict:
+        return {**asdict(self), "deps": _deps_to_json(self.deps)}
+
+    @staticmethod
+    def from_json(data: dict) -> "BranchInventory":
+        return BranchInventory(
+            ref=data["ref"], head=data.get("head", ""), reason=data.get("reason", ""),
+            deps=_deps_from_json(data.get("deps")), changed_paths=tuple(data.get("changed_paths", ())),
+            removed_paths=tuple(data.get("removed_paths", ())), errors=tuple(data.get("errors", ())),
+            unparsed=tuple(data.get("unparsed", ())),
+        )
 
 
 @dataclass(frozen=True)
@@ -37,16 +76,19 @@ class RepoInventory:
     files_read: int = 0
     note: str = ""
     unparsed: tuple[str, ...] = ()  # "ecosystem:path" for dependency files we cannot parse
+    branches: tuple[BranchInventory, ...] = ()  # other branches that were checked
+    branch_note: str = ""  # anything that limited which branches were checked
 
     def to_json(self) -> dict:
         """Compact form for the cache: each dependency is a short list, not an object."""
         data = asdict(self)
-        data["deps"] = [[d.file, d.ecosystem, d.name, d.version, d.spec, d.exact] for d in self.deps]
+        data["deps"] = _deps_to_json(self.deps)
+        data["branches"] = [branch.to_json() for branch in self.branches]
         return data
 
     @staticmethod
     def from_json(data: dict) -> "RepoInventory":
-        deps = tuple(Dep(*d) for d in data.get("deps", ()))
+        deps = _deps_from_json(data.get("deps"))
         return RepoInventory(
             repo=data["repo"],
             pushed_at=data.get("pushed_at", ""),
@@ -55,6 +97,8 @@ class RepoInventory:
             files_read=data.get("files_read", 0),
             note=data.get("note", ""),
             unparsed=tuple(data.get("unparsed", ())),
+            branches=tuple(BranchInventory.from_json(b) for b in data.get("branches", ())),
+            branch_note=data.get("branch_note", ""),
         )
 
 

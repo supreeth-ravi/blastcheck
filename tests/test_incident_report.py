@@ -50,8 +50,8 @@ def test_affected_report_has_verdict_evidence_checklist_and_reply(agent_framewor
     body = report.issue_body(agent_framework, results, {r.repo: r for r in fake_org}, "acme-labs", NOW)
     assert body.startswith(report.marker(agent_framework))
     assert "AFFECTED" in body and "**Unconfirmed.**" in body
-    assert "| `pinned-bad` | `uv.lock` |" in body
-    assert "| `loose-no-lock` | `requirements.txt` | `agent-framework>=1.20` |" in body
+    assert "| `pinned-bad` | default | `uv.lock` |" in body
+    assert "| `loose-no-lock` | default | `requirements.txt` | `agent-framework>=1.20` |" in body
     assert "- `broken`: package.json: could not parse" in body.replace("\\", "")
     assert "Rotate every credential" in body and "agent_framework_meta.pth" in body
     assert "Pin `agent-framework` to `1.26.0`" in body

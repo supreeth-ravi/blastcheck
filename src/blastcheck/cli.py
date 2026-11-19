@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from . import __version__, confirm, incident as incident_mod, inventory, matcher, notify, report
+from .branches import Settings
 from .github import GitHub, GitHubError, resolve_token
 from .models import AFFECTED, AT_RISK, INCOMPLETE, Incident
 
@@ -33,6 +34,10 @@ def build_parser() -> argparse.ArgumentParser:
         p.add_argument("--cache", default=DEFAULT_CACHE, help=f"inventory cache file (default {DEFAULT_CACHE})")
         p.add_argument("--no-cache", action="store_true", help="re-read every repo")
         p.add_argument("--include-archived", action="store_true")
+        p.add_argument("--no-branches", action="store_true", help="read default branches only")
+        p.add_argument("--branch-days", type=int, default=30,
+                       help="also read branches pushed within this many days (default 30; 0 = deploy-named only)")
+        p.add_argument("--max-branches", type=int, default=15, help="most extra branches read per repo (default 15)")
         p.add_argument("--workers", type=int, default=8)
         p.add_argument("--quiet", action="store_true")
 
@@ -83,12 +88,13 @@ def load_incident(args: argparse.Namespace) -> Incident:
 def get_inventory(args: argparse.Namespace, gh: GitHub) -> tuple[dict, tuple[str, ...]]:
     if not _OWNER.match(args.org):
         raise GitHubError(400, f"{args.org!r} is not a valid GitHub org or user name")
-    cache = {} if args.no_cache else inventory.load_cache(args.cache, args.org)
+    settings = Settings(enabled=not args.no_branches, days=max(0, args.branch_days), limit=max(0, args.max_branches))
+    cache = {} if args.no_cache else inventory.load_cache(args.cache, args.org, settings)
     progress = None if args.quiet else say
-    result, skipped = inventory.build(gh, args.org, cache, args.include_archived, args.workers, progress)
+    result, skipped = inventory.build(gh, args.org, cache, args.include_archived, args.workers, progress, settings)
     if not result:
         raise GitHubError(404, f"no repos visible in {args.org!r}; check the org name and the token's access")
-    inventory.save_cache(args.cache, args.org, result)
+    inventory.save_cache(args.cache, args.org, result, settings)
     return result, skipped
 
 
@@ -124,7 +130,8 @@ def cmd_setup(args: argparse.Namespace) -> int:
     with_files = [i for i in inventories.values() if i.files_read]
     problems = [i for i in inventories.values() if i.errors]
     say(f"\n{len(inventories)} repos visible in {args.org}; {len(with_files)} have dependency files; "
-        f"{sum(len(i.deps) for i in inventories.values())} dependency lines read.")
+        f"{sum(len(i.deps) for i in inventories.values())} dependency lines read; "
+        f"{sum(len(i.branches) for i in inventories.values())} other branches checked.")
     for inv in problems:
         say(f"  could not fully read {inv.repo}: {inv.errors[0]}")
     if skipped:
@@ -143,7 +150,7 @@ def cmd_check(args: argparse.Namespace) -> int:
     worst = matcher.headline(results)
 
     body = report.issue_body(incident, results, inventories, args.org, skipped=skipped)
-    summary = report.summary(incident, results, args.org, skipped)
+    summary = report.summary(incident, results, args.org, skipped, inventories)
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     (out / f"{incident.slug}.md").write_text(body + "\n")

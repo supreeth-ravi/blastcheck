@@ -1,7 +1,11 @@
 """Shared fixtures. Every repo, org and person name here is invented."""
+import hashlib
+import re
+
 import pytest
 
 from blastcheck import parsers
+from blastcheck.github import GitHubError
 from blastcheck.models import Incident, RepoInventory
 
 
@@ -60,3 +64,73 @@ def fake_org():
         repo("llm-proxy", {"pyproject.toml": '[project]\ndependencies = ["litellm~=1.82.0,!=1.82.7,!=1.82.8"]\n'}),
         repo("llm-loose", {"requirements.txt": "litellm>=1.80\n"}),
     ]
+
+
+class FakeGitHub:
+    """Serves an invented org from memory and counts what is fetched.
+
+    repos: name -> {"files": {path: text}, "branches": {branch: {"files": {...}, "date": iso}}, flags...}
+    File fingerprints are derived from content, as in git, so identical files share one.
+    """
+
+    def __init__(self, repos, graphql_error=None):
+        self.repos = repos
+        self.blob_reads = 0
+        self.tree_reads = 0
+        self.graphql_calls = 0
+        self.issues = []
+        self.graphql_error = graphql_error
+        self._blobs = {}
+
+    def _sha(self, text):
+        sha = hashlib.sha1(text.encode()).hexdigest()
+        self._blobs[sha] = text
+        return sha
+
+    def list_repos(self, owner):
+        return [{"name": n, "full_name": f"{owner}/{n}", "pushed_at": r.get("pushed_at", "t1"),
+                 "default_branch": "main", "archived": r.get("archived", False)} for n, r in self.repos.items()]
+
+    def graphql(self, query):
+        self.graphql_calls += 1
+        if self.graphql_error:
+            raise self.graphql_error
+        data = {}
+        for alias, name in re.findall(r'(r\d+): repository\(owner: "[^"]+", name: "([^"]+)"\)', query):
+            spec = self.repos[name]
+            nodes = [{"name": "main", "target": {"oid": f"{name}@main", "committedDate": "2026-11-18T00:00:00Z"}}]
+            for branch, info in spec.get("branches", {}).items():
+                head = f"{name}@main" if info.get("same_head") else f"{name}@{branch}"
+                nodes.append({"name": branch, "target": {"oid": head, "committedDate": info.get("date", "2020-01-01T00:00:00Z")}})
+            data[alias] = {"defaultBranchRef": {"name": "main", "target": {"oid": f"{name}@main"}},
+                           "refs": {"totalCount": spec.get("total_branches", len(nodes)), "nodes": nodes}}
+        return data
+
+    def tree(self, full_name, ref):
+        self.tree_reads += 1
+        name = full_name.split("/")[1]
+        spec = self.repos[name]
+        if spec.get("empty"):
+            raise GitHubError(409, "Git Repository is empty")
+        if spec.get("forbidden"):
+            raise GitHubError(403, "Resource not accessible")
+        files = spec["files"]
+        if "@" in ref and not ref.endswith("@main"):
+            info = spec["branches"][ref.split("@", 1)[1]]
+            if info.get("broken"):
+                raise GitHubError(500, "boom")
+            files = info["files"]
+        entries = [{"path": p, "type": "blob", "sha": self._sha(t), "size": spec.get("size", len(t)), "mode": "100644"}
+                   for p, t in files.items()]
+        return {"tree": entries, "truncated": spec.get("truncated", False)}
+
+    def blob_text(self, full_name, sha):
+        self.blob_reads += 1
+        return self._blobs[sha]
+
+    def is_private(self, repo):
+        return not repo.endswith("-public")
+
+    def upsert_issue(self, repo, marker, title, body):
+        self.issues.append((repo, title, body))
+        return "https://example.test/issues/1"

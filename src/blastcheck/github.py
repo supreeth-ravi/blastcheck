@@ -63,6 +63,16 @@ class GitHub:
     def get(self, path: str, params: dict | None = None) -> object:
         return self._call("GET", path, params).json()
 
+    def graphql(self, query: str) -> dict:
+        """Run one GraphQL query. Raises GitHubError when no data comes back."""
+        result = self._call("POST", "graphql", payload={"query": query}).json()
+        data = result.get("data") if isinstance(result, dict) else None
+        if not isinstance(data, dict):
+            errors = result.get("errors") if isinstance(result, dict) else None
+            message = errors[0].get("message", "") if isinstance(errors, list) and errors else "no data returned"
+            raise GitHubError(0, f"GraphQL: {message}"[:200])
+        return data
+
     def paginate(self, path: str, params: dict | None = None) -> list:
         items: list = []
         page = 1
