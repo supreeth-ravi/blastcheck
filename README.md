@@ -1,12 +1,16 @@
 <div align="center">
 
-# blastcheck
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo-dark.svg">
+  <img src="docs/images/logo-light.svg" alt="blastcheck" height="72">
+</picture>
 
 **Know in a minute which of your repos use a compromised package.**
 
 When a dependency you rely on is hijacked or found vulnerable, blastcheck checks every repo in your GitHub org and drafts the reply. It runs in your own setup, on your own credentials. Nothing is hosted and your code is never sent anywhere.
 
-[![Version](https://img.shields.io/badge/version-0.1.0-111?style=flat-square)](pyproject.toml)
+[![Tests](https://img.shields.io/github/actions/workflow/status/phronetic-ai/blastcheck/test.yml?branch=main&style=flat-square&label=tests)](https://github.com/phronetic-ai/blastcheck/actions/workflows/test.yml)
+[![Version](https://img.shields.io/badge/version-0.1.0-111?style=flat-square)](CHANGELOG.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111?style=flat-square)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-%E2%89%A53.11-111?style=flat-square)](https://www.python.org)
 [![Dependencies: none](https://img.shields.io/badge/dependencies-none-111?style=flat-square)](pyproject.toml)
@@ -308,6 +312,8 @@ When in doubt it flags. Pre-release versions, dist-tags such as `next`, and spec
 - **It writes in one place:** issues in the scan repo you chose. It refuses to write there, or to a run summary, if that repo is public, because the report names private repos and files.
 - **No analytics or tracking.** There is no blastcheck server.
 
+More in [Security](SECURITY.md).
+
 Keep the scan repo private and limit who can push to it: anyone who can run a modified workflow there can read its secrets. For a stricter setup, move the secrets into a GitHub Environment restricted to the default branch and pin the actions to commit SHAs.
 
 ## What it does not cover
@@ -369,6 +375,10 @@ A first scan of about 140 repos and 40 extra branches is roughly 800 GitHub API 
 
 It is as fresh as OSV. A new malicious release is caught once OSV lists it, typically within hours. For the gap before that, run <code>check</code> by hand with the versions from the first report.
 </details>
+
+## Contributing
+
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md). To report a security problem in blastcheck itself, see [SECURITY.md](SECURITY.md). Changes are listed in the [changelog](CHANGELOG.md).
 
 ## Development
 
