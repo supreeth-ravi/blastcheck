@@ -2,9 +2,9 @@
 
 # blastcheck
 
-**A package just got compromised. Are we using it?**
+**Know in a minute which of your repos use a compromised package.**
 
-One answer for every repo in your GitHub org, in about a minute, with the reply already drafted. It runs in your own setup, on your own credentials. Nothing is hosted and your code is never sent anywhere.
+When a dependency you rely on is hijacked or found vulnerable, blastcheck checks every repo in your GitHub org and drafts the reply. It runs in your own setup, on your own credentials. Nothing is hosted and your code is never sent anywhere.
 
 [![Version](https://img.shields.io/badge/version-0.1.0-111?style=flat-square)](pyproject.toml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-111?style=flat-square)](LICENSE)
