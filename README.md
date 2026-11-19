@@ -133,7 +133,7 @@ The GitHub Action writes each incident as an issue in your own scan repo. This i
 > **Package:** `next` (npm) — bad versions: `15.2.4`<br>
 > **Confirmed** by an outside source: OSV lists GHSA-2464-fhr4-w9xw, GHSA-267c-6grr-h53f, GHSA-26hh-7cqf-hhc6 and 33 more for next 15.2.4
 >
-> Checked **142** repos in `acme-labs` on 2026-11-19 09:20 UTC. Besides each default branch, **43** other branches were checked (deploy-named or recently pushed); 29 of them differ in their dependency files.
+> Checked **142** repos in `acme-labs` on 2026-11-19 09:20 UTC. Besides each default branch, **38** other branches were checked (deploy-named or recently pushed); 21 of them differ in their dependency files.
 >
 > | Verdict | Repos |
 > |---|---:|
@@ -164,8 +164,8 @@ The GitHub Action writes each incident as an issue in your own scan repo. This i
 The daily watch prints one line when nothing matches:
 
 ```
-Asked OSV about 7254 packages used in 139 repos: 66 malware advisories exist for them,
-0 match what the org uses, 66 concern only versions the org does not use.
+Asked OSV about 6810 packages used in 142 repos: 58 malware advisories exist for them,
+0 match what the org uses, 58 concern only versions the org does not use.
 ```
 
 ## Where the intelligence is
@@ -217,7 +217,7 @@ gh auth login            # if you have not already; blastcheck uses this login
 blastcheck check --org <org> --package agent-framework --ecosystem pypi --bad 1.26.1,1.26.2
 ```
 
-The first run reads every repo (about a minute for 140 repos). Later runs reuse `.blastcheck/inventory.json` and re-read only repos that have been pushed to since.
+The first run reads every repo (about a minute for 150 repos). Later runs reuse `.blastcheck/inventory.json` and re-read only repos that have been pushed to since.
 
 ### As a GitHub Action in your org
 
@@ -367,7 +367,7 @@ A Conda package can share its name and version with an unrelated malicious packa
 <details>
 <summary><b>What does a run cost?</b></summary>
 
-A first scan of about 140 repos and 40 extra branches is roughly 800 GitHub API calls, against a limit of 5,000 an hour per user. Later runs re-read only what changed. OSV is free. There is no model cost unless you paste article links.
+A first scan of about 150 repos and 40 extra branches is roughly 800 GitHub API calls, against a limit of 5,000 an hour per user. Later runs re-read only what changed. OSV is free. There is no model cost unless you paste article links.
 </details>
 
 <details>
